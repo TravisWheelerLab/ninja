@@ -26,5 +26,5 @@ Planned work, roughly in order.
 - Branch lengths can come out negative when both children of a join get a
   negative length (the reference does the same; 93 of 40,000 at 20,000
   simulated taxa). Decide whether to clamp both to zero.
-- [ ] `-v` with no value fails ("a value is required for --verbose"); accept a bare `-v` as verbose level 2 (clap default_missing_value). Seen by a colleague 2026-09-14.
-- [ ] Quote Newick labels that contain `#` (and any other character outside the plain set): extended-Newick readers such as IcyTree and Dendroscope read `name#tag` as a reticulation node and merge every leaf sharing the tag, so RepeatMasker-style names come out as a network with cycles. Found 2026-09-14.
+- [x] 2026-09-15: `-v` with no value fails ("a value is required for --verbose"); accept a bare `-v` as verbose level 2 (clap default_missing_value). Seen by a colleague 2026-09-14.
+- [x] 2026-09-16, decided against: Quote Newick labels that contain `#` (and any other character outside the plain set): extended-Newick readers such as IcyTree and Dendroscope read `name#tag` as a reticulation node and merge every leaf sharing the tag, so RepeatMasker-style names come out as a network with cycles. Found 2026-09-14. Quoting only helps IcyTree; Dendroscope and SplitsTree strip quotes and still merge labels whose tag starts with H, L or R, so Travis dropped the idea as a hack with little benefit.

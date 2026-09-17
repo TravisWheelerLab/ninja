@@ -69,6 +69,11 @@ struct Cli {
     #[arg(long = "corr_type", value_parser = parse_correction, value_name = "n|j|k|s|m")]
     corr_type: Option<Correction>,
 
+    /// Substitution matrix for protein distances: BLOSUM62, BLOSUM45, or a
+    /// file in the NCBI format used by BLAST. Ignored for DNA.
+    #[arg(long = "matrix", default_value = "BLOSUM62", value_name = "NAME|FILENAME")]
+    matrix: String,
+
     /// Worker threads for distance computation (0 = all cores).
     #[arg(short = 'T', long = "threads", default_value_t = 0)]
     threads: usize,
@@ -97,9 +102,13 @@ struct Cli {
     #[arg(long = "reference_order")]
     reference_order: bool,
 
-    /// Verbosity 0-3.
-    #[arg(short = 'v', long = "verbose", default_value_t = 1)]
-    verbose: u8,
+    /// Verbosity 0-3 (default 1).
+    #[arg(long = "verbose", value_name = "LEVEL")]
+    verbose: Option<u8>,
+
+    /// More progress output: -v is level 2, -vv level 3.
+    #[arg(short = 'v', action = clap::ArgAction::Count)]
+    v: u8,
 
     /// Same as --verbose 0.
     #[arg(short = 'q', long = "quiet")]
@@ -153,7 +162,13 @@ fn physical_memory() -> Option<u64> {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let verbose = if cli.quiet { 0 } else { cli.verbose };
+    let verbose = if cli.quiet {
+        0
+    } else if cli.v > 0 {
+        (1 + cli.v).min(3)
+    } else {
+        cli.verbose.unwrap_or(1)
+    };
     if verbose >= 1 {
         eprintln!("NINJA v{} (Rust) by Travis Wheeler", ninja::VERSION);
         eprintln!("Please cite:\n{}\n", ninja::CITATION);
@@ -170,6 +185,7 @@ fn main() -> ExitCode {
         output_kind: cli.out_type,
         alphabet: cli.alph_type,
         correction: cli.corr_type,
+        matrix: cli.matrix,
         method: cli.method,
         nj: NjParams {
             cluster_count: cli.clust_size,

@@ -152,9 +152,20 @@ Kimura two-parameter (the default), or none; a pair whose correction is
 undefined (saturated) gets the cap of 3 (1 with no correction).
 
 Protein distances follow FastTree: the mean over comparable sites of a
-BLOSUM45-derived dissimilarity, then the scoredist-like correction
-`-1.3 ln(1 - d)` for `d < 0.91` and the cap of 3 otherwise. Sites where
-either residue is not one of the twenty standard amino acids are skipped.
+dissimilarity derived from a substitution matrix (BLOSUM62 by default;
+`--matrix` selects BLOSUM45 or a file in NCBI format), then the
+scoredist-like correction `-1.3 ln(1 - d)` for `d < 0.91` and the cap of 3
+otherwise. Sites where either residue is not one of the twenty standard
+amino acids are skipped.
+
+The dissimilarity of residues `a` and `b` is `2^(-s(a,b)·bits) / sqrt(r_a r_b)`,
+where `s` is the log-odds score, `bits` its unit (1/2 for BLOSUM62, 1/3 for
+BLOSUM45, read from the file's header comment or estimated from the scores)
+and `r_a` the average of `2^(-s(a,x)·bits)` over a fixed background
+composition, so that a random pair has a dissimilarity near 1. Applied to
+BLOSUM45 this reproduces FastTree's published table to 1e-14; the built-in
+BLOSUM45 uses that table as published, so its output is unchanged from
+earlier releases.
 
 The onegap distance (`--corr_type m`), from the C++ `cluster` branch and
 Mothur, is `(mismatches + gap openings) / (compared columns + gap

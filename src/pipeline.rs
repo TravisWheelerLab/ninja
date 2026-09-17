@@ -1,12 +1,12 @@
 //! End-to-end driver shared by the command-line tool and library users.
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::alphabet::{Alphabet, Correction};
 use crate::cluster;
-use crate::distance::{DistanceCalculator, DistanceMatrix};
+use crate::distance::{DistanceCalculator, DistanceMatrix, SubstitutionMatrix};
 use crate::error::{Error, Result};
 use crate::io::{fasta, phylip, resolve_duplicates, DuplicateNames, Renamed};
 use crate::nj::extmem::DiskMatrix;
@@ -67,6 +67,10 @@ pub struct Options {
     pub collapse_identical: bool,
     /// What to do when two input records share a name.
     pub duplicate_names: DuplicateNames,
+    /// Substitution matrix for protein distances: a built-in name
+    /// (`BLOSUM62`, `BLOSUM45`) or the path of a file in NCBI format.
+    /// Ignored for DNA.
+    pub matrix: String,
 }
 
 impl Default for Options {
@@ -85,6 +89,7 @@ impl Default for Options {
             cluster_cutoff: 0.03,
             collapse_identical: false,
             duplicate_names: DuplicateNames::Rename,
+            matrix: "BLOSUM62".to_string(),
         }
     }
 }
@@ -155,7 +160,24 @@ pub fn run(opts: &Options, out: &mut dyn Write) -> Result<RunOutput> {
             } else {
                 (aln, None, None)
             };
-            let calc = DistanceCalculator::new(&aln, opts.correction)?;
+            let calc = match aln.alphabet {
+                Alphabet::Amino => {
+                    let m = resolve_matrix(&opts.matrix)?;
+                    if verbose >= 1 {
+                        eprintln!("Substitution matrix: {}", m.name());
+                    }
+                    if !m.scale_declared() {
+                        eprintln!(
+                            "warning: {} does not state its score unit; using an estimate of {:.3} bits per unit. \
+                             A comment line such as \"# scale of ln(2)/2\" in the file sets it exactly.",
+                            m.name(),
+                            m.bits()
+                        );
+                    }
+                    DistanceCalculator::with_matrix(&aln, opts.correction, &m)?
+                }
+                Alphabet::Dna => DistanceCalculator::new(&aln, opts.correction)?,
+            };
             let k = aln.len();
 
             if opts.output_kind == OutputKind::Distances {
@@ -384,6 +406,14 @@ fn choose_method(opts: &Options, k: usize) -> Method {
             }
         }
         m => m,
+    }
+}
+
+/// A built-in matrix by name, else a file in NCBI format.
+fn resolve_matrix(spec: &str) -> Result<SubstitutionMatrix> {
+    match SubstitutionMatrix::by_name(spec) {
+        Some(m) => Ok(m),
+        None => SubstitutionMatrix::from_file(Path::new(spec)),
     }
 }
 

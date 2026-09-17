@@ -36,7 +36,14 @@ fn help_and_version() {
 fn inmem_trees_match_java_in_reference_order() {
     for f in FIXTURES {
         let path = fixture(&format!("{}.fa", f));
-        let got = ninja_stdout(&["-q", "--reference_order", "--in", path.to_str().unwrap()]);
+        let got = ninja_stdout(&[
+            "-q",
+            "--reference_order",
+            "--matrix",
+            "BLOSUM45",
+            "--in",
+            path.to_str().unwrap(),
+        ]);
         let want = read(&reference(&format!("{}.inmem.java.nwk", f)));
         assert_same_newick(&got, &want);
     }
@@ -48,7 +55,7 @@ fn inmem_trees_match_java_in_reference_order() {
 fn inmem_trees_match_java_by_default() {
     for f in FIXTURES {
         let path = fixture(&format!("{}.fa", f));
-        let got = ninja_stdout(&["-q", "--in", path.to_str().unwrap()]);
+        let got = ninja_stdout(&["-q", "--matrix", "BLOSUM45", "--in", path.to_str().unwrap()]);
         let want = read(&reference(&format!("{}.inmem.java.nwk", f)));
         assert_trees_close(&got, &want, 0.0, 0.0);
     }
@@ -60,7 +67,7 @@ fn extmem_trees_match_java() {
         let path = fixture(&format!("{}.fa", f));
         let want = read(&reference(&format!("{}.extmem.java.nwk", f)));
         for mode in [&["--reference_order"][..], &[][..]] {
-            let mut args = vec!["-q", "-m", "extmem"];
+            let mut args = vec!["-q", "-m", "extmem", "--matrix", "BLOSUM45"];
             args.extend_from_slice(mode);
             args.extend_from_slice(&["--in", path.to_str().unwrap()]);
             let got = ninja_stdout(&args);
@@ -90,8 +97,15 @@ fn positional_input_and_output_file() {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("tree.nwk");
     let path = fixture("PF08271_seed.fa");
-    let stdout =
-        ninja_stdout(&["-q", "--reference_order", path.to_str().unwrap(), "-o", out.to_str().unwrap()]);
+    let stdout = ninja_stdout(&[
+        "-q",
+        "--reference_order",
+        "--matrix",
+        "BLOSUM45",
+        path.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+    ]);
     assert!(stdout.is_empty());
     let want = read(&reference("PF08271_seed.inmem.java.nwk"));
     assert_same_newick(&read(&out), &want);
@@ -115,7 +129,7 @@ fn reads_alignment_from_stdin() {
     use std::io::Write;
     use std::process::{Command, Stdio};
     let mut child = Command::new(ninja_bin())
-        .args(["-q"])
+        .args(["-q", "--matrix", "BLOSUM45"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -133,7 +147,8 @@ fn reads_alignment_from_stdin() {
 fn distance_matrices_match_java() {
     for f in ["PF08271_seed", "dna_200", "protein_120"] {
         let path = fixture(&format!("{}.fa", f));
-        let got = ninja_stdout(&["-q", "--out_type", "d", "--in", path.to_str().unwrap()]);
+        let got =
+            ninja_stdout(&["-q", "--out_type", "d", "--matrix", "BLOSUM45", "--in", path.to_str().unwrap()]);
         let want = read(&reference(&format!("{}.java.phylip", f)));
         // Values are printed with six decimals by both; require identity.
         assert_phylip_close(&got, &want, 0.0);
@@ -450,4 +465,65 @@ fn names_with_hash_draw_a_warning_for_tree_output() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     assert!(!stderr.contains("contain '#'"), "{stderr}");
+}
+
+#[test]
+fn bare_v_raises_verbosity() {
+    let f = common::fixture("dna_700.fa");
+    let run = |extra: &[&str]| {
+        let mut args = vec!["--in", f.to_str().unwrap()];
+        args.extend_from_slice(extra);
+        let out = common::run_ninja(&args);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    assert!(run(&["--verbose", "0"]).is_empty());
+    let one = run(&[]);
+    // A bare -v is accepted and means level 2; -vv means level 3, which
+    // reports every join and is far longer.
+    let two = run(&["-v"]);
+    assert_eq!(two.lines().count(), run(&["--verbose", "2"]).lines().count());
+    let three = run(&["-vv"]);
+    assert_eq!(three.lines().count(), run(&["--verbose", "3"]).lines().count());
+    assert!(three.len() > 10 * one.len(), "-vv should add much more output");
+}
+
+#[test]
+fn matrix_flag_selects_the_substitution_matrix() {
+    let path = fixture("protein_120.fa");
+    let p = path.to_str().unwrap();
+    let want = read(&reference("protein_120.java.phylip"));
+    // A built-in name, in any case; BLOSUM45 reproduces the reference exactly.
+    let got45 = ninja_stdout(&["-q", "--out_type", "d", "--matrix", "blosum45", "--in", p]);
+    assert_phylip_close(&got45, &want, 0.0);
+    // The default is BLOSUM62, which differs.
+    let got62 = ninja_stdout(&["-q", "--out_type", "d", "--in", p]);
+    assert_eq!(got62, ninja_stdout(&["-q", "--out_type", "d", "--matrix", "BLOSUM62", "--in", p]));
+    assert_ne!(got62, got45);
+    parse_phylip(&got62);
+    // A file in NCBI format holding the BLOSUM62 scores gives the same distances.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("my_matrix.txt");
+    let text = include_str!("../src/distance/matrices/BLOSUM62.txt");
+    std::fs::write(&file, text).unwrap();
+    let custom = ninja_stdout(&["-q", "--out_type", "d", "--matrix", file.to_str().unwrap(), "--in", p]);
+    assert_eq!(custom, got62);
+    // Without a comment stating the score unit, the unit is estimated and a warning says so.
+    let stripped: String = text.lines().filter(|l| !l.starts_with('#')).collect::<Vec<_>>().join("\n");
+    std::fs::write(&file, stripped).unwrap();
+    let out = run_ninja(&["-q", "--out_type", "d", "--matrix", file.to_str().unwrap(), "--in", p]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(stderr.contains("score unit"), "{stderr}");
+    // A broken file is reported with its name and line.
+    std::fs::write(&file, "   A  R\nA  4\n").unwrap();
+    let out = run_ninja(&["-q", "--matrix", file.to_str().unwrap(), "--in", p]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("my_matrix.txt") && stderr.contains("line 2"), "{stderr}");
+    // The flag is ignored for DNA.
+    let dna = fixture("dna_200.fa");
+    let a = ninja_stdout(&["-q", "--in", dna.to_str().unwrap()]);
+    let b = ninja_stdout(&["-q", "--matrix", "BLOSUM45", "--in", dna.to_str().unwrap()]);
+    assert_eq!(a, b);
 }

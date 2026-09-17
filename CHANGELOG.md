@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+* Protein distances use BLOSUM62 by default. `--matrix` selects BLOSUM45
+  or reads a matrix file in the NCBI format; the dissimilarities are derived
+  with the transformation FastTree applied to BLOSUM45, which reproduces
+  its table. Protein trees therefore differ from rc.2 unless
+  `--matrix BLOSUM45` is given.
+* A bare `-v` now works: `-v` is verbosity 2 and `-vv` is 3. `--verbose N`
+  still sets a level directly.
+
 ## 2.0.0-rc.2 (2026-09-14)
 
 * ninja warns when sequence names contain `#`, because viewers that read

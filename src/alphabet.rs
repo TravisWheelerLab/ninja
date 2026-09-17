@@ -59,8 +59,8 @@ impl fmt::Display for Alphabet {
 /// evolutionary distance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Correction {
-    /// Raw proportion of differing sites (DNA) or mean BLOSUM45 dissimilarity
-    /// (protein), capped at 1.
+    /// Raw proportion of differing sites (DNA) or mean substitution-matrix
+    /// dissimilarity (protein), capped at 1.
     None,
     /// Jukes-Cantor: `d = -3/4 ln(1 - 4/3 p)`. DNA only.
     JukesCantor,

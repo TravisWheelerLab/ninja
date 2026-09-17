@@ -64,6 +64,15 @@ override these. `--corr_type m` selects Mothur's "onegap" distance,
 either alphabet; a run of columns gapped in only one sequence counts as one
 opening, terminal gaps included. `ninja --help` lists every option.
 
+Protein distances start from a substitution matrix, BLOSUM62 by default.
+`--matrix BLOSUM45` selects the other built-in matrix, and `--matrix FILENAME`
+reads any matrix in the NCBI format that BLAST and EMBOSS use: `#` comment
+lines, a header row of residue letters, then one row of integer scores per
+residue. The two built-in matrices are in that format under
+`src/distance/matrices/` and show the format. A comment such as
+`# scale of ln(2)/2` states the score unit; without one ninja estimates it
+from the scores and says so.
+
 `--collapse_identical` builds the tree over one representative of each set
 of identical sequences and attaches the rest as zero-length branches. It
 saves work when an alignment has many duplicates. It is off for now so
@@ -111,7 +120,8 @@ external-memory engine trades that for disk.
 ## Library
 
 The crate exposes the pieces separately: `io::fasta` and `io::phylip`
-readers and writers, `distance::DistanceCalculator` for pairwise distances,
+readers and writers, `distance::DistanceCalculator` for pairwise distances
+(with `distance::SubstitutionMatrix` to pick or load a matrix),
 `nj::inmem::build` and `nj::extmem::build` for the search, and `tree::Tree`
 for Newick output. `ninja::run` does what the binary does. See
 `examples/library.rs` and the API documentation (`cargo doc --open`).

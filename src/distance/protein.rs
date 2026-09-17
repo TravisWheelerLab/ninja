@@ -1,5 +1,6 @@
 //! Byte-indexed protein sequences and the scoredist correction.
 
+#[cfg(test)]
 use super::bl45::BL45;
 use super::gaps::{self, RunState};
 use crate::alphabet::{Alphabet, Correction};
@@ -21,8 +22,9 @@ pub struct PackedProtein {
 }
 
 impl PackedProtein {
-    /// Index sequences and build the padded table.
-    pub fn new(seqs: &[Vec<u8>]) -> Self {
+    /// Index sequences and pad the dissimilarity table (row and column
+    /// 20 stay zero for gaps and non-standard residues).
+    pub fn new(seqs: &[Vec<u8>], dissim: &[[f32; 20]; 20]) -> Self {
         let width = seqs.first().map_or(0, |s| s.len());
         let lookup = Alphabet::Amino.index_table();
         let words1 = width.div_ceil(64).max(1);
@@ -40,7 +42,7 @@ impl PackedProtein {
         let mut table = vec![0f32; 21 * 21];
         for a in 0..20 {
             for b in 0..20 {
-                table[a * 21 + b] = BL45[a][b];
+                table[a * 21 + b] = dissim[a][b];
             }
         }
         PackedProtein { width, idx, table, words1, valid1 }
@@ -116,14 +118,14 @@ mod tests {
 
     #[test]
     fn identical_sequences_have_zero_distance() {
-        let p = PackedProtein::new(&[b"ACDEFGHIK".to_vec(), b"ACDEFGHIK".to_vec()]);
+        let p = PackedProtein::new(&[b"ACDEFGHIK".to_vec(), b"ACDEFGHIK".to_vec()], &BL45);
         assert_eq!(p.score(0, 1), (0.0, 9));
         assert_eq!(correct(0.0, 9, Correction::ScoreDist), 0.0);
     }
 
     #[test]
     fn skips_gaps_and_unknowns() {
-        let p = PackedProtein::new(&[b"A-XR".to_vec(), b"AR-N".to_vec()]);
+        let p = PackedProtein::new(&[b"A-XR".to_vec(), b"AR-N".to_vec()], &BL45);
         let (sum, sites) = p.score(0, 1);
         assert_eq!(sites, 2);
         assert!((sum - BL45[1][2]).abs() < 1e-7); // R vs N

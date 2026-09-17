@@ -23,8 +23,10 @@ mod dna;
 pub mod gaps;
 mod matrix;
 mod protein;
+pub mod submat;
 
 pub use matrix::DistanceMatrix;
+pub use submat::SubstitutionMatrix;
 
 use crate::alphabet::{Alphabet, Correction};
 use crate::error::{Error, Result};
@@ -52,6 +54,16 @@ impl DistanceCalculator {
     /// for protein. A correction that does not apply to the alphabet is an
     /// error.
     pub fn new(aln: &Alignment, correction: Option<Correction>) -> Result<Self> {
+        Self::with_matrix(aln, correction, &SubstitutionMatrix::blosum62())
+    }
+
+    /// Like [`new`](Self::new) with a chosen substitution matrix for
+    /// protein distances (ignored for DNA).
+    pub fn with_matrix(
+        aln: &Alignment,
+        correction: Option<Correction>,
+        matrix: &SubstitutionMatrix,
+    ) -> Result<Self> {
         let alphabet = aln.alphabet;
         let correction = correction.unwrap_or_else(|| Correction::default_for(alphabet));
         if !correction.applies_to(alphabet) {
@@ -62,7 +74,9 @@ impl DistanceCalculator {
         }
         let packed = match alphabet {
             Alphabet::Dna => Packed::Dna(dna::PackedDna::new(&aln.seqs)),
-            Alphabet::Amino => Packed::Amino(protein::PackedProtein::new(&aln.seqs)),
+            Alphabet::Amino => {
+                Packed::Amino(protein::PackedProtein::new(&aln.seqs, &matrix.dissimilarities()))
+            }
         };
         Ok(DistanceCalculator { alphabet, correction, packed, n: aln.len() })
     }
