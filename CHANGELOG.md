@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.0-rc.3 (2026-09-16)
 
 * Protein distances use BLOSUM62 by default. `--matrix` selects BLOSUM45
   or reads a matrix file in the NCBI format; the dissimilarities are derived
