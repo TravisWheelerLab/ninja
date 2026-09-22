@@ -72,7 +72,7 @@ sequences. All three are here, with these differences:
   SSE DNA kernel only: protein input silently got the scoredist distance,
   and DNA with `--NOSSE` silently got zero for every pair.
 * **Collapsing identical sequences** was dead code on the branch (tree
-  output was disabled there). Here it is `--collapse_identical`, off by
-  default.
+  output was disabled there). Here it is the default, and
+  `--no_collapse_identical` turns it off.
 * The branch's `--print-times` flag and `-v` for version are not carried
   over; `--verbose` reports timings.

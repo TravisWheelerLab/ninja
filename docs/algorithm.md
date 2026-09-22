@@ -188,15 +188,15 @@ the graph whose edges are pairs at distance at most the cutoff, so it is
 computed with a union-find over pairs as their distances are produced, a
 chunk of rows at a time in parallel, and no matrix is kept.
 
-## Identical sequences (`--collapse_identical`)
+## Identical sequences
 
 Sequences with identical residues are grouped before any distance is
 computed. Neighbor joining runs on one representative per group; in the
 finished tree each group replaces its representative's leaf with a chain
 `(first, (second, (third, ...)))` of zero-length branches, the chain as a
-whole carrying the representative's branch length. Without the flag,
-identical sequences are joined by the ordinary search through zero
-distances, which gives the same splits with the zero-length branches
-arranged by tie order. Branch lengths differ slightly between the two,
+whole carrying the representative's branch length. Under
+`--no_collapse_identical`, identical sequences are joined by the ordinary
+search through zero distances, which gives the same splits with the
+zero-length branches arranged by tie order. Branch lengths differ slightly between the two,
 since the NJ length formula depends on the number of taxa and on row sums,
 and the collapsed run is the NJ tree of the unique sequences.

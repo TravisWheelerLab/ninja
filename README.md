@@ -73,11 +73,12 @@ residue. The two built-in matrices are in that format under
 `# scale of ln(2)/2` states the score unit; without one ninja estimates it
 from the scores and says so.
 
-`--collapse_identical` builds the tree over one representative of each set
-of identical sequences and attaches the rest as zero-length branches. It
-saves work when an alignment has many duplicates. It is off for now so
-that output matches the Java tool exactly, and is planned to become the
-default.
+Identical sequences are collapsed before the search: the tree is built over
+one representative of each set, and the rest are attached as zero-length
+branches. This saves work when an alignment has many duplicates, and it
+changes nothing but the arrangement of those zero-length branches.
+`--no_collapse_identical` gives each duplicate its own join, as releases
+before 2.0.0 did.
 
 ### Engines and memory
 

@@ -46,9 +46,19 @@ struct Cli {
     out_type: OutputKind,
 
     /// Build the tree over one representative of each set of identical
-    /// sequences, then attach the rest as zero-length branches.
+    /// sequences, then attach the rest as zero-length branches. This is the
+    /// default; the flag is accepted so older command lines keep working.
     #[arg(long = "collapse_identical")]
     collapse_identical: bool,
+
+    /// Give every identical sequence its own join instead of collapsing the
+    /// group, as releases before 2.0.0 did.
+    #[arg(
+        long = "no_collapse_identical",
+        alias = "no-collapse-identical",
+        conflicts_with = "collapse_identical"
+    )]
+    no_collapse_identical: bool,
 
     /// When two records share a name: 'rename' appends _2, _3, ... to the
     /// later ones and lists them on standard error; 'error' refuses the input.
@@ -198,7 +208,7 @@ fn main() -> ExitCode {
         tmp_dir: cli.tmp_dir,
         memory_bytes,
         cluster_cutoff: cli.cluster_cutoff,
-        collapse_identical: cli.collapse_identical,
+        collapse_identical: !cli.no_collapse_identical,
         duplicate_names: cli.duplicate_names,
     };
 

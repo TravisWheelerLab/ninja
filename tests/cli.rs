@@ -399,18 +399,25 @@ fn collapse_identical_preserves_tree() {
     let path = fixture("dna_200_dups.fa");
     let p = path.to_str().unwrap();
     for method in ["inmem", "extmem"] {
-        let plain = ninja_stdout(&["-q", "-m", method, "--in", p]);
-        let collapsed = ninja_stdout(&["-q", "-m", method, "--collapse_identical", "--in", p]);
+        let plain = ninja_stdout(&["-q", "-m", method, "--no_collapse_identical", "--in", p]);
+        let collapsed = ninja_stdout(&["-q", "-m", method, "--in", p]);
         assert_ne!(plain, collapsed);
+        // Collapsing is the default; the old flag still selects it.
+        assert_eq!(collapsed, ninja_stdout(&["-q", "-m", method, "--collapse_identical", "--in", p]));
         assert_trees_close(&plain, &collapsed, 1e-9, 5e-3);
         let t = parse_newick(&collapsed);
         assert_eq!(t.leaves.len(), 207);
         assert!(collapsed.contains("seq133_dup1:0.00000"));
     }
-    // Without duplicates the flag changes nothing.
+    // Without duplicates the setting changes nothing.
     let path = fixture("dna_200.fa");
     let p = path.to_str().unwrap();
-    assert_eq!(ninja_stdout(&["-q", "--in", p]), ninja_stdout(&["-q", "--collapse_identical", "--in", p]));
+    assert_eq!(ninja_stdout(&["-q", "--in", p]), ninja_stdout(&["-q", "--no_collapse_identical", "--in", p]));
+    // Asking for both at once is an error.
+    let dups = fixture("dna_200_dups.fa");
+    let out =
+        run_ninja(&["-q", "--collapse_identical", "--no_collapse_identical", "--in", dups.to_str().unwrap()]);
+    assert!(!out.status.success());
 }
 
 #[test]

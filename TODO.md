@@ -9,8 +9,6 @@ Planned work, roughly in order.
   and decide whether to offer C and Python bindings. The current
   `pub` surface exists but has not been reviewed with outside callers in
   mind.
-- Make `--collapse_identical` the default once the feature set is
-  complete (it is off so that output matches the Java tool exactly).
 - The minimum Rust version (1.85) is set by clap 4.6; CI builds with it.
 - More speed in the in-memory engine. Profile for 20,000 taxa (about
   15 s): heap pushes of each new node's distances 6 s (4 s of it the
@@ -28,3 +26,4 @@ Planned work, roughly in order.
   simulated taxa). Decide whether to clamp both to zero.
 - [x] 2026-09-15: `-v` with no value fails ("a value is required for --verbose"); accept a bare `-v` as verbose level 2 (clap default_missing_value). Seen by a colleague 2026-09-14.
 - [x] 2026-09-16, decided against: Quote Newick labels that contain `#` (and any other character outside the plain set): extended-Newick readers such as IcyTree and Dendroscope read `name#tag` as a reticulation node and merge every leaf sharing the tag, so RepeatMasker-style names come out as a network with cycles. Found 2026-09-14. Quoting only helps IcyTree; Dendroscope and SplitsTree strip quotes and still merge labels whose tag starts with H, L or R, so Travis dropped the idea as a hack with little benefit.
+- [x] 2026-09-21: `--collapse_identical` is now the default, with `--no_collapse_identical` to turn it off.

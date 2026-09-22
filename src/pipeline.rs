@@ -63,7 +63,8 @@ pub struct Options {
     /// [`OutputKind::Clusters`].
     pub cluster_cutoff: f32,
     /// Build the tree over one representative of each set of identical
-    /// sequences, then re-attach the others as zero-length chains.
+    /// sequences, then re-attach the others as zero-length chains. On by
+    /// default; it changes only how zero-length branches are arranged.
     pub collapse_identical: bool,
     /// What to do when two input records share a name.
     pub duplicate_names: DuplicateNames,
@@ -87,7 +88,7 @@ impl Default for Options {
             tmp_dir: None,
             memory_bytes: 2 << 30,
             cluster_cutoff: 0.03,
-            collapse_identical: false,
+            collapse_identical: true,
             duplicate_names: DuplicateNames::Rename,
             matrix: "BLOSUM62".to_string(),
         }

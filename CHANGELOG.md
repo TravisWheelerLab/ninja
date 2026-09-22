@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+* Identical sequences are collapsed by default: the tree is built over one
+  representative of each set and the duplicates hang off it as zero-length
+  branches. `--no_collapse_identical` restores the old behaviour. Only the
+  arrangement of zero-length branches changes, and branch lengths shift
+  slightly because the neighbor-joining formula depends on the taxon count.
+
 ## 2.0.0-rc.3 (2026-09-16)
 
 * Protein distances use BLOSUM62 by default. `--matrix` selects BLOSUM45
