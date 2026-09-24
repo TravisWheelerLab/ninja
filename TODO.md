@@ -3,12 +3,19 @@
 Planned work, roughly in order.
 
 - **Library use.** Make the crate a first-class library, not just the
-  binary's internals: settle the public API (`DistanceCalculator`,
-  `DistanceMatrix`, the two `build` functions, `Tree`, `run`), keep it
-  stable across releases, document every public item with examples,
-  and decide whether to offer C and Python bindings. The current
-  `pub` surface exists but has not been reviewed with outside callers in
-  mind.
+  binary's internals. The surface is now settled and narrowed (2026-09-23,
+  below); what remains is to keep it stable across releases, document every
+  public item with an example, and decide whether to offer C and Python
+  bindings.
+- Write a code example for each public item. All 258 items carried a doc
+  comment, enforced by `missing_docs`, but not one had a ```-fenced example;
+  the only runnable ones are the two at the crate level in `src/lib.rs`.
+  Roughly 70 items remain public after the narrowing. Raised 2026-09-23.
+- Settle `SubstitutionMatrix`'s three failure conventions: `blosum62` and
+  `blosum45` panic through `.expect`, `by_name` returns `Option`, and
+  `from_file` and `parse` return `Result` (`src/distance/submat.rs:36-73`).
+  Defensible as it stands, since the compiled-in matrices cannot fail, but
+  worth a decision before the surface is frozen. Raised 2026-09-23.
 - The minimum Rust version (1.85) is set by clap 4.6; CI builds with it.
 - More speed in the in-memory engine. Profile for 20,000 taxa (about
   15 s): heap pushes of each new node's distances 6 s (4 s of it the
@@ -39,6 +46,17 @@ Planned work, roughly in order.
   100,000-taxon run twice for "low memory" while the machine had 572 GB available. A
   `setsid nohup` relaunch on 2026-09-23 is the current attempt; tmux and systemd-run are
   also on the machine and untried. Raised 2026-09-23.
+- [x] 2026-09-23: Narrowed the public API surface, from 258 items to about
+  70. `heap`, `distance::gaps`, `nj::extmem::matrix` and `nj::extmem::budget`
+  are private modules; the `CandidateHeap` re-export is gone; `cluster::write_table`,
+  `DistanceMatrix::prefetch` and the raw `DiskMatrix` accessors and layout
+  constants are `pub(crate)`. `NjStats` is re-exported at the crate root.
+  `DiskMatrix::prefetch`, `DiskMatrix::mem_row`, `MinHeap::iter` and
+  `CandidateHeap::is_empty` turned out to be uncalled and were deleted;
+  four accessors used only by unit tests are now `#[cfg(test)]`. Not yet committed.
+- [x] 2026-09-23: Deleting the uncalled `DiskMatrix::prefetch` removed the
+  crate's second `unsafe` block, so the claim at `src/lib.rs:45` that there
+  is only one is true again.
 - Release 2.0.0 final once the library API review is done. Travis asked for it on
   2026-09-21 and pulled it back when he saw the open items.
 

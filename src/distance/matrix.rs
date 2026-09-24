@@ -99,7 +99,7 @@ impl DistanceMatrix {
     /// Hint the cache that `(i, j)` will be read soon.
     #[inline]
     #[allow(unsafe_code)]
-    pub fn prefetch(&self, i: usize, j: usize) {
+    pub(crate) fn prefetch(&self, i: usize, j: usize) {
         let (a, b) = if i < j { (i, j) } else { (j, i) };
         let idx = Self::index(self.k, a, b);
         #[cfg(target_arch = "x86_64")]

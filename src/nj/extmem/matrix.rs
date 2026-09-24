@@ -27,28 +27,28 @@ use crate::error::{Error, Result};
 
 /// Disk block size in floats; the resident window is a multiple of this
 /// whenever the budget affords one.
-pub const PAGE_BLOCK: usize = 1024;
+pub(crate) const PAGE_BLOCK: usize = 1024;
 
 /// Narrowest resident window, in columns. A window below this pages so
 /// often that the run would never finish.
-pub const MIN_WINDOW_COLS: usize = 64;
+pub(crate) const MIN_WINDOW_COLS: usize = 64;
 
 /// The engine's view of the distance matrix.
 pub struct DiskMatrix {
     /// Number of taxa.
     pub k: usize,
     /// Floats per on-disk row: `2K - 2`.
-    pub row_len: usize,
+    pub(crate) row_len: usize,
     /// Width of the resident window.
-    pub mem_cols: usize,
+    pub(crate) mem_cols: usize,
     /// Resident window, `k * mem_cols`, row-major.
     mem: Vec<f32>,
     /// On-disk rows, or `None` when the whole matrix is resident.
     disk: Option<File>,
     /// First column held in the resident window.
-    pub first_mem_col: usize,
+    pub(crate) first_mem_col: usize,
     /// Initial row sums, in double precision.
-    pub r: Vec<f64>,
+    pub(crate) r: Vec<f64>,
 }
 
 impl std::fmt::Debug for DiskMatrix {
@@ -83,7 +83,7 @@ fn write_at(disk: Option<&File>, row: usize, row_len: usize, col: usize, bytes: 
 /// Round a distance to seven decimals as the reference did:
 /// `round(d * 1e7) / 1e7` in single precision, ties toward +infinity.
 #[inline]
-pub fn round7(d: f64) -> f32 {
+pub(crate) fn round7(d: f64) -> f32 {
     let f = (1e7 * d) as f32;
     let r = (f as f64 + 0.5).floor();
     r as f32 / 1e7f32
@@ -97,7 +97,7 @@ impl DiskMatrix {
     /// time, but a budget too small for one block gets a narrower window
     /// instead of overrunning: `MIN_WINDOW_COLS` columns is the floor, and
     /// only the full width is ever exceeded.
-    pub fn window_width(k: usize, window_bytes: u64) -> usize {
+    pub(crate) fn window_width(k: usize, window_bytes: u64) -> usize {
         let full = 2 * k - 2;
         let cols = (window_bytes / (4 * k as u64)) as usize;
         let width =
@@ -244,47 +244,23 @@ impl DiskMatrix {
         self.disk.is_some()
     }
 
-    /// Hint the cache that resident cell `(row, col)` will be read soon.
-    #[inline]
-    #[allow(unsafe_code)]
-    pub fn prefetch(&self, row: usize, col: usize) {
-        #[cfg(target_arch = "x86_64")]
-        {
-            let idx = row * self.mem_cols + (col - self.first_mem_col);
-            let p = self.mem.as_ptr().wrapping_add(idx) as *const i8;
-            // SAFETY: prefetch has no architectural effect and takes any
-            // address; the pointer is derived from a live slice.
-            unsafe { std::arch::x86_64::_mm_prefetch(p, std::arch::x86_64::_MM_HINT_T0) };
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            let _ = (row, col);
-        }
-    }
-
     /// Resident entry at `(row, col)`; `col >= first_mem_col`.
     #[inline]
-    pub fn mem_get(&self, row: usize, col: usize) -> f32 {
+    pub(crate) fn mem_get(&self, row: usize, col: usize) -> f32 {
         debug_assert!(col >= self.first_mem_col);
         self.mem[row * self.mem_cols + (col - self.first_mem_col)]
     }
 
     /// Set the resident entry at `(row, col)`; `col >= first_mem_col`.
     #[inline]
-    pub fn mem_set(&mut self, row: usize, col: usize, v: f32) {
+    pub(crate) fn mem_set(&mut self, row: usize, col: usize, v: f32) {
         debug_assert!(col >= self.first_mem_col);
         let idx = row * self.mem_cols + (col - self.first_mem_col);
         self.mem[idx] = v;
     }
 
-    /// The resident row slice.
-    #[inline]
-    pub fn mem_row(&self, row: usize) -> &[f32] {
-        &self.mem[row * self.mem_cols..(row + 1) * self.mem_cols]
-    }
-
     /// Read `buf.len()` floats of on-disk row `row` starting at `col`.
-    pub fn read_disk(&mut self, row: usize, col: usize, buf: &mut [f32]) -> Result<()> {
+    pub(crate) fn read_disk(&mut self, row: usize, col: usize, buf: &mut [f32]) -> Result<()> {
         let f = self
             .disk
             .as_mut()
@@ -300,14 +276,14 @@ impl DiskMatrix {
     }
 
     /// Read a single on-disk entry.
-    pub fn read_disk_one(&mut self, row: usize, col: usize) -> Result<f32> {
+    pub(crate) fn read_disk_one(&mut self, row: usize, col: usize) -> Result<f32> {
         let mut b = [0f32; 1];
         self.read_disk(row, col, &mut b)?;
         Ok(b[0])
     }
 
     /// Write floats to on-disk row `row` starting at `col`.
-    pub fn write_disk(&mut self, row: usize, col: usize, data: &[f32]) -> Result<()> {
+    pub(crate) fn write_disk(&mut self, row: usize, col: usize, data: &[f32]) -> Result<()> {
         let f = self
             .disk
             .as_mut()
@@ -323,7 +299,7 @@ impl DiskMatrix {
     }
 
     /// Append the resident window of every listed row to disk.
-    pub fn flush_rows(&mut self, rows: impl Iterator<Item = usize>) -> Result<()> {
+    pub(crate) fn flush_rows(&mut self, rows: impl Iterator<Item = usize>) -> Result<()> {
         let first = self.first_mem_col;
         let width = self.mem_cols;
         let mut buf = vec![0f32; width];
@@ -337,7 +313,7 @@ impl DiskMatrix {
 
 /// A sliding read buffer over one on-disk row, so a sequential scan of old
 /// columns reads the file a block at a time.
-pub struct RowPager {
+pub(crate) struct RowPager {
     row: usize,
     start: usize,
     buf: Vec<f32>,
@@ -346,13 +322,13 @@ pub struct RowPager {
 
 impl RowPager {
     /// A pager for `row` with `width` floats per page.
-    pub fn new(row: usize, width: usize) -> Self {
+    pub(crate) fn new(row: usize, width: usize) -> Self {
         RowPager { row, start: usize::MAX, buf: vec![0.0; width], valid: 0 }
     }
 
     /// Entry at column `col` of the pager's row (must be an on-disk column).
     #[inline]
-    pub fn get(&mut self, m: &mut DiskMatrix, col: usize) -> Result<f32> {
+    pub(crate) fn get(&mut self, m: &mut DiskMatrix, col: usize) -> Result<f32> {
         if self.start == usize::MAX || col < self.start || col >= self.start + self.valid {
             let width = self.buf.len();
             let start = col / width * width;

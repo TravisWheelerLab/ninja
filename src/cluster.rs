@@ -130,7 +130,7 @@ impl UnionFind {
 
 /// Write the cluster table: one `id<TAB>name` line per item, grouped by
 /// cluster.
-pub fn write_table<W: std::io::Write + ?Sized>(
+pub(crate) fn write_table<W: std::io::Write + ?Sized>(
     w: &mut W,
     clusters: &Clusters,
     names: &[String],

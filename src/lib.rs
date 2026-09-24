@@ -53,7 +53,7 @@ pub mod alphabet;
 pub mod cluster;
 pub mod distance;
 pub mod error;
-pub mod heap;
+mod heap;
 pub mod io;
 pub mod nj;
 pub mod tree;
@@ -64,7 +64,7 @@ pub use alphabet::{Alphabet, Correction};
 pub use distance::DistanceMatrix;
 pub use error::{Error, Result};
 pub use io::DuplicateNames;
-pub use nj::{Method, NjParams};
+pub use nj::{Method, NjParams, NjStats};
 pub use pipeline::{run, InputKind, Options, OutputKind, RunOutput};
 pub use tree::Tree;
 

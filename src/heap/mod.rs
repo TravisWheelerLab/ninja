@@ -9,6 +9,6 @@ mod array_heap;
 mod binary_heap;
 mod pair_queue;
 
-pub use array_heap::{ArrayHeap, ArrayHeapConfig, Pair};
+pub use array_heap::{ArrayHeap, ArrayHeapConfig};
 pub use binary_heap::MinHeap;
 pub use pair_queue::{Entry, PairQueue};

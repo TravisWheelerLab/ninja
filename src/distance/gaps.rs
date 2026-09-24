@@ -50,6 +50,7 @@ pub fn openings_word(va: u64, vb: u64, both: u64, state: &mut RunState) -> u32 {
 
 /// Reference implementation over per-site validity flags, one column at a
 /// time, transcribed from the C++ cluster branch's state machine.
+#[cfg(test)]
 pub fn openings_scalar(valid_a: &[bool], valid_b: &[bool]) -> u32 {
     let mut in_gap = 0u8;
     let mut openings = 0;
@@ -84,6 +85,7 @@ pub fn onegap_distance(mismatches: u32, sites: u32, openings: u32, maxscore: f32
 }
 
 /// Count openings over whole-sequence masks (`len` real columns).
+#[cfg(test)]
 pub fn openings_masks(va: &[u64], vb: &[u64], len: usize) -> u32 {
     let mut state = RunState::default();
     let mut total = 0;

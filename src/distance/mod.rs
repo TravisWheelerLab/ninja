@@ -20,7 +20,7 @@
 
 mod bl45;
 mod dna;
-pub mod gaps;
+mod gaps;
 mod matrix;
 mod protein;
 pub mod submat;

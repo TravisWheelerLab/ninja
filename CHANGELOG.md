@@ -13,6 +13,18 @@
 * A tight budget buys fewer clusters: rather than starve every cluster-pair
   heap, the engine reduces the cluster count until each heap has a megabyte
   to work with, and says so under `--verbose`.
+* The library's public surface is narrower. The priority-queue module, the
+  gap-counting helpers, the disk-matrix accessors and layout constants, the
+  candidate heap and `cluster::write_table` are now internal; most were
+  reachable only because the module holding them was left public. `NjStats`
+  joins `Method` and `NjParams` at the crate root: it is what
+  `nj::inmem::build` returns, and it was the only one of the three a caller
+  had to name by its full path.
+* Four functions turned out to be uncalled and are gone:
+  `DiskMatrix::prefetch`, `DiskMatrix::mem_row`, `MinHeap::iter` and
+  `CandidateHeap::is_empty`. Deleting the first removed the crate's second
+  `unsafe` block, leaving the single cache-prefetch hint in
+  `distance::matrix` that `lib.rs` describes.
 
 * Identical sequences are collapsed by default: the tree is built over one
   representative of each set and the duplicates hang off it as zero-length

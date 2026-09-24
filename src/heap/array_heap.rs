@@ -207,6 +207,7 @@ impl ArrayHeap {
     }
 
     /// True when no entries remain.
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.n == 0
     }

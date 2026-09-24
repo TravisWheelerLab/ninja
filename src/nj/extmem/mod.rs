@@ -4,19 +4,19 @@
 //!
 //! * distances are `f32` in a [`DiskMatrix`] whose older columns live on
 //!   disk;
-//! * each cluster-pair heap is an [`ArrayHeap`] backed by a scratch file;
+//! * each cluster-pair heap is an `ArrayHeap` backed by a scratch file;
 //! * when the candidate list grows past a threshold, it is frozen into a
-//!   [`CandidateHeap`] (also disk-backed) that is later scanned under a
+//!   `CandidateHeap` (also disk-backed) that is later scanned under a
 //!   bound derived from the drift in row sums.
 
-pub mod budget;
+mod budget;
 mod candidate_heap;
-pub mod matrix;
+use candidate_heap::CandidateHeap;
+mod matrix;
 
 use std::path::{Path, PathBuf};
 
 pub use budget::{MemoryPlan, MIN_MEMORY_BYTES};
-pub use candidate_heap::CandidateHeap;
 pub use matrix::DiskMatrix;
 
 use matrix::RowPager;

@@ -57,6 +57,7 @@ impl<K: PartialOrd + Copy, V: Copy> MinHeap<K, V> {
     }
 
     /// True when there are no entries.
+    #[cfg(test)]
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
@@ -113,11 +114,6 @@ impl<K: PartialOrd + Copy, V: Copy> MinHeap<K, V> {
         let k = k.min(self.items.len());
         let start = self.items.len() - k;
         self.items.drain(start..).collect()
-    }
-
-    /// Iterate over entries in array (not sorted) order.
-    pub fn iter(&self) -> impl Iterator<Item = &(K, V)> {
-        self.items.iter()
     }
 
     /// Keep only the entries for which `keep` returns true, then rebuild.

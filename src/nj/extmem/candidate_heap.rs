@@ -98,11 +98,6 @@ impl CandidateHeap {
         self.heap.len()
     }
 
-    /// True when no entries remain.
-    pub fn is_empty(&self) -> bool {
-        self.heap.is_empty()
-    }
-
     /// Smallest entry as `(i, j, q')`.
     pub fn peek(&self) -> Option<(i32, i32, f32)> {
         self.heap.peek()

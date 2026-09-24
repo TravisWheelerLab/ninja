@@ -40,11 +40,13 @@ impl PairQueue {
     }
 
     /// Number of entries.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.run.len() - self.cursor + self.heap.len()
     }
 
     /// True when no entries remain.
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
