@@ -15,15 +15,23 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 
 use rayon::prelude::*;
 
+use super::budget::MemoryPlan;
 use crate::distance::DistanceCalculator;
 use crate::error::{Error, Result};
 
-/// Disk block size in floats; the resident window is a multiple of this.
+/// Disk block size in floats; the resident window is a multiple of this
+/// whenever the budget affords one.
 pub const PAGE_BLOCK: usize = 1024;
+
+/// Narrowest resident window, in columns. A window below this pages so
+/// often that the run would never finish.
+pub const MIN_WINDOW_COLS: usize = 64;
 
 /// The engine's view of the distance matrix.
 pub struct DiskMatrix {
@@ -55,6 +63,23 @@ impl std::fmt::Debug for DiskMatrix {
     }
 }
 
+/// Write one row's disk-bound bytes at column `col`, from any thread.
+/// Rows never overlap, so positioned writes need no lock.
+fn write_at(disk: Option<&File>, row: usize, row_len: usize, col: usize, bytes: &[u8]) -> Result<()> {
+    let f = disk.ok_or_else(|| Error::invalid("distance matrix is fully resident; no disk to write"))?;
+    let pos = 4 * (row_len as u64 * row as u64 + col as u64);
+    #[cfg(unix)]
+    {
+        f.write_all_at(bytes, pos)?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (f, pos);
+        Err(Error::invalid("positioned writes need a Unix target"))
+    }
+}
+
 /// Round a distance to seven decimals as the reference did:
 /// `round(d * 1e7) / 1e7` in single precision, ties toward +infinity.
 #[inline]
@@ -65,25 +90,27 @@ pub fn round7(d: f64) -> f32 {
 }
 
 impl DiskMatrix {
-    /// Choose the resident window width for `k` taxa under a memory budget.
+    /// Choose the resident window width for `k` taxa from the bytes the
+    /// memory plan gives the window.
     ///
-    /// A tenth of the budget goes to the window (the heaps and candidate
-    /// structures need the rest), rounded down to whole blocks, at least
-    /// one block, and never more than the full width.
-    pub fn window_width(k: usize, memory_bytes: u64) -> usize {
+    /// Whole blocks are preferred, since the window is paged a block at a
+    /// time, but a budget too small for one block gets a narrower window
+    /// instead of overrunning: `MIN_WINDOW_COLS` columns is the floor, and
+    /// only the full width is ever exceeded.
+    pub fn window_width(k: usize, window_bytes: u64) -> usize {
         let full = 2 * k - 2;
-        let max_bytes = memory_bytes / 10;
-        let cols = (max_bytes / (4 * k as u64)) as usize;
-        let blocks = (cols / PAGE_BLOCK).max(1);
-        (blocks * PAGE_BLOCK).min(full)
+        let cols = (window_bytes / (4 * k as u64)) as usize;
+        let width =
+            if cols >= PAGE_BLOCK { cols / PAGE_BLOCK * PAGE_BLOCK } else { cols.max(MIN_WINDOW_COLS) };
+        width.min(full)
     }
 
-    fn allocate(k: usize, memory_bytes: u64, tmp_dir: &Path) -> Result<Self> {
+    fn allocate(k: usize, window_bytes: u64, tmp_dir: &Path) -> Result<Self> {
         if k < 2 {
             return Err(Error::invalid("the external-memory engine needs at least two taxa"));
         }
         let row_len = 2 * k - 2;
-        let mem_cols = Self::window_width(k, memory_bytes);
+        let mem_cols = Self::window_width(k, window_bytes);
         let disk = if mem_cols >= row_len {
             None
         } else {
@@ -115,48 +142,62 @@ impl DiskMatrix {
 
     /// Fill the matrix from a distance calculator, computing rows in
     /// parallel.
-    pub fn from_calculator(calc: &DistanceCalculator, memory_bytes: u64, tmp_dir: &Path) -> Result<Self> {
+    pub fn from_calculator(calc: &DistanceCalculator, plan: &MemoryPlan, tmp_dir: &Path) -> Result<Self> {
         let k = calc.len();
-        let mut m = Self::allocate(k, memory_bytes, tmp_dir)?;
+        let mut m = Self::allocate(k, plan.window_bytes, tmp_dir)?;
         let to_disk = m.cols_to_disk();
         m.first_mem_col = to_disk;
         let mem_cols = m.mem_cols;
 
-        // Each row's distances are computed once, in parallel over blocks
-        // of rows so that the on-disk parts held in memory stay bounded:
-        // resident columns go straight into the window, the rest are
-        // written to disk block by block. Each row sums its distances in
-        // column order, as the reference did.
-        const ROWS_PER_BLOCK: usize = 512;
+        // Rows are computed in parallel: resident columns go straight into
+        // the window, and the columns bound for disk are written out a
+        // block at a time as they are produced. Each row sums its distances
+        // in column order, as the reference did.
+        //
+        // Writing as we go, rather than holding each row's disk-bound part
+        // until the whole block of rows is done, keeps the scratch at one
+        // small buffer per thread instead of one full row per row in
+        // flight. At 100,000 taxa a full row is 400 kB, so buffering them
+        // made the budget, not the machine, decide how many threads could
+        // work at once.
+        let chunk_floats = PAGE_BLOCK.min(to_disk.max(1));
+        let scratch_rows = (plan.build_scratch / (4 * chunk_floats as u64).max(1)).max(1);
+        let rows_per_block = (scratch_rows as usize).clamp(1, 4096);
+        let row_len = m.row_len;
         let mut start = 0;
         while start < k {
-            let end = (start + ROWS_PER_BLOCK).min(k);
-            let mem = &mut m.mem[start * mem_cols..end * mem_cols];
-            let sums_and_disk: Vec<(f64, Vec<f32>)> = mem
+            let end = (start + rows_per_block).min(k);
+            let disk = m.disk.as_ref();
+            let sums: Result<Vec<f64>> = m.mem[start * mem_cols..end * mem_cols]
                 .par_chunks_mut(mem_cols)
                 .enumerate()
                 .map(|(off, chunk)| {
                     let row = start + off;
                     let mut sum = 0f64;
-                    let mut disk_part = Vec::with_capacity(to_disk);
+                    let mut buf: Vec<u8> = Vec::with_capacity(4 * chunk_floats);
+                    let mut written = 0usize;
                     for col in 0..k {
                         let d = if col == row { 0.0 } else { round7(calc.calc(row, col)) };
                         sum += d as f64;
                         if col < to_disk {
-                            disk_part.push(d);
+                            buf.extend_from_slice(&d.to_le_bytes());
+                            if buf.len() == 4 * chunk_floats {
+                                write_at(disk, row, row_len, written, &buf)?;
+                                written += chunk_floats;
+                                buf.clear();
+                            }
                         } else {
                             chunk[col - to_disk] = d;
                         }
                     }
-                    (sum, disk_part)
+                    if !buf.is_empty() {
+                        write_at(disk, row, row_len, written, &buf)?;
+                    }
+                    Ok(sum)
                 })
                 .collect();
-            for (off, (sum, disk_part)) in sums_and_disk.into_iter().enumerate() {
-                let row = start + off;
-                m.r[row] = sum;
-                if to_disk > 0 {
-                    m.write_disk(row, 0, &disk_part)?;
-                }
+            for (off, sum) in sums?.into_iter().enumerate() {
+                m.r[start + off] = sum;
             }
             start = end;
         }
@@ -167,11 +208,12 @@ impl DiskMatrix {
     /// in `1e-8` units) with the given memory budget.
     pub fn from_phylip(
         p: &crate::io::phylip::PhylipMatrix,
-        memory_bytes: u64,
+        window_bytes: u64,
         tmp_dir: &Path,
     ) -> Result<Self> {
+        // One row at a time, so only the window needs an allowance.
         let k = p.len();
-        let mut m = Self::allocate(k, memory_bytes, tmp_dir)?;
+        let mut m = Self::allocate(k, window_bytes, tmp_dir)?;
         let to_disk = m.cols_to_disk();
         m.first_mem_col = to_disk;
         let mut disk_part = vec![0f32; to_disk];
@@ -337,20 +379,30 @@ mod tests {
 
     #[test]
     fn window_width_bounds() {
+        // Never wider than the matrix.
         assert_eq!(DiskMatrix::window_width(10, 1 << 30), 18);
-        assert_eq!(DiskMatrix::window_width(100_000, 1 << 30), PAGE_BLOCK);
-        assert_eq!(DiskMatrix::window_width(5_000, 1 << 30), 5 * PAGE_BLOCK);
+        // Whole blocks once the allowance affords them: 400 MB over
+        // 100,000 taxa buys 1,048 columns, which rounds down to one block.
+        assert_eq!(DiskMatrix::window_width(100_000, 400 << 20), PAGE_BLOCK);
+        assert_eq!(DiskMatrix::window_width(5_000, 100 << 20), 5 * PAGE_BLOCK);
+        // Below one block the window narrows instead of overrunning.
+        assert_eq!(DiskMatrix::window_width(100_000, 40 << 20), 104);
+        assert_eq!(DiskMatrix::window_width(1_000_000, 1 << 20), MIN_WINDOW_COLS);
     }
 
     #[test]
     fn disk_round_trip_and_pager() {
         let dir = tempfile::tempdir().unwrap();
-        // A tiny budget gives a one-block window, which is narrower than the
-        // matrix once there are more than 513 taxa.
+        // One block of window is narrower than the matrix once there are
+        // more than 513 taxa, so the rest pages from disk.
         let k = 600;
-        let mut m = DiskMatrix::allocate(k, 1, dir.path()).unwrap();
+        let mut m = DiskMatrix::allocate(k, 4 * 600 * PAGE_BLOCK as u64, dir.path()).unwrap();
         assert!(m.uses_disk());
         assert_eq!(m.mem_cols, PAGE_BLOCK);
+        // An allowance too small for a block still pages rather than overrun.
+        let narrow = DiskMatrix::allocate(k, 1, dir.path()).unwrap();
+        assert!(narrow.uses_disk());
+        assert_eq!(narrow.mem_cols, MIN_WINDOW_COLS);
         let data: Vec<f32> = (0..m.row_len).map(|c| c as f32 * 0.5).collect();
         m.write_disk(3, 0, &data).unwrap();
         assert_eq!(m.read_disk_one(3, 17).unwrap(), 8.5);
@@ -363,7 +415,7 @@ mod tests {
     #[test]
     fn small_matrices_stay_resident() {
         let dir = tempfile::tempdir().unwrap();
-        let m = DiskMatrix::allocate(40, 1, dir.path()).unwrap();
+        let m = DiskMatrix::allocate(40, 4 * 40 * 78, dir.path()).unwrap();
         assert!(!m.uses_disk());
         assert_eq!(m.mem_cols, 78);
         assert_eq!(m.cols_to_disk(), 0);

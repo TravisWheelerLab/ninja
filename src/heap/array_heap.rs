@@ -35,8 +35,9 @@ pub type Pair = (i32, i32);
 /// Sizing parameters of an [`ArrayHeap`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArrayHeapConfig {
-    /// Memory the structure may use for its in-memory buffers, in bytes.
-    /// Determines `c_m` (the run size) and the disk block size.
+    /// Resident memory this structure may use, in bytes: its own buffers
+    /// and the caller's staging buffer. Determines `c_m` (the run size) and
+    /// the disk block size.
     pub memory_bytes: u64,
 }
 
@@ -46,13 +47,29 @@ impl Default for ArrayHeapConfig {
     }
 }
 
-const MAX_LEVELS: usize = 4;
+/// Levels of disk runs. A heap holds `c_m * (slots + 1)^(MAX_LEVELS - 1)`
+/// entries, so the level count decides how few, and therefore how large,
+/// the cluster-pair heaps may be: entries per heap grow as the heaps grow
+/// scarcer, while each heap's capacity falls with its buffer. The
+/// reference used four, which at 100,000 taxa under a small budget fills
+/// up and fails; six leaves room to spare and costs two more slot buffers.
+const MAX_LEVELS: usize = 6;
 const NUM_FIELDS: usize = 3;
-/// Fraction of the memory budget used for the run size; the paper used 1/7,
-/// NINJA stores more per entry and uses 1/85.
-const C: f64 = 1.0 / 85.0;
+/// Resident bytes each entry of a run costs: the in-memory run heap, the
+/// slot buffers backing the runs on disk (one per level), the run-head heap
+/// and the slot bookkeeping, plus the caller's staging buffer of the same
+/// length. Set from measured peak memory rather than `size_of`, because
+/// `Vec` rounds capacities up as it grows.
+const BYTES_PER_RUN_ENTRY: usize = 62;
 /// Output buffering during merges, in blocks.
 const OUT_BLOCKS: usize = 10;
+
+/// Fewest blocks in a run. A run of `b` blocks gives `b - 1` slots per
+/// level and so `(b - 1 + 1)^(MAX_LEVELS - 1)` runs' worth of capacity; at
+/// four blocks that is a few million entries, which a large run overruns.
+/// Sixteen leaves capacity to spare and costs about a megabyte, which is
+/// what the reference gave every heap.
+const MIN_RUN_BLOCKS: usize = 16;
 
 /// Sentinel for "next key for this slot not yet fetched".
 const UNFETCHED: f32 = f32::MIN_POSITIVE;
@@ -99,6 +116,15 @@ impl std::fmt::Debug for ArrayHeap {
 }
 
 impl ArrayHeap {
+    /// Bytes a heap needs before its run size stops shrinking. An
+    /// allowance below this buys nothing, so the memory plan does not hand
+    /// out smaller ones.
+    pub fn min_allowance() -> u64 {
+        let block = 1024u64;
+        let fixed = 4 * block + 4 * OUT_BLOCKS as u64 * block;
+        MIN_RUN_BLOCKS as u64 * block * BYTES_PER_RUN_ENTRY as u64 + fixed
+    }
+
     /// Create an empty heap whose scratch file lives in `dir`.
     ///
     /// The scratch file is unnamed and removed when the heap is dropped.
@@ -111,14 +137,21 @@ impl ArrayHeap {
         } else {
             1024
         };
-        let c_m = ((C * mem as f64) as u64).max(16) as usize;
+        // read_buf and out_buf are the only buffers that do not scale with
+        // the run size; give them theirs first.
+        let fixed = (4 * block_size + 4 * OUT_BLOCKS * block_size) as u64;
+        let c_m = (mem.saturating_sub(fixed) / BYTES_PER_RUN_ENTRY as u64)
+            .max(MIN_RUN_BLOCKS as u64 * block_size as u64) as usize;
         let num_slots = (c_m / block_size).saturating_sub(1).max(1);
         let nodes_per_block = block_size / NUM_FIELDS;
         let fields_per_block = nodes_per_block * NUM_FIELDS;
         let mut cnt_max = [0u64; MAX_LEVELS];
         cnt_max[0] = c_m as u64;
         for l in 1..MAX_LEVELS {
-            cnt_max[l] = cnt_max[l - 1] * (num_slots as u64 + 1);
+            // With a large run size the product runs past 64 bits several
+            // levels down; that level can hold everything anyone will ever
+            // insert, so saturating is the right answer.
+            cnt_max[l] = cnt_max[l - 1].saturating_mul(num_slots as u64 + 1);
         }
         let file = tempfile::tempfile_in(dir).map_err(|e| Error::io(dir, e))?;
         let mut h = ArrayHeap {
@@ -582,6 +615,24 @@ mod tests {
     fn lcg(state: &mut u64) -> u32 {
         *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         (*state >> 33) as u32
+    }
+
+    /// The smallest heap we allow must still hold a whole cluster pair's
+    /// worth of a very large matrix. A tight budget gives few, large
+    /// cluster-pair heaps, so each takes a bigger share: at 100,000 taxa
+    /// and four clusters, one heap sees about 5e8 entries. Four levels held
+    /// 6.7e7, and a run died part way through at "merge runs at its top
+    /// level".
+    #[test]
+    fn a_minimal_heap_holds_a_huge_cluster_pair() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = ArrayHeapConfig { memory_bytes: ArrayHeap::min_allowance() };
+        let h = ArrayHeap::new(dir.path(), cfg).unwrap();
+        let capacity = (h.run_size() as u128) * (h.num_slots as u128 + 1).pow(MAX_LEVELS as u32 - 1);
+        assert!(capacity > 5_000_000_000, "capacity {capacity} is too small for 100,000 taxa");
+        // An allowance below the minimum buys the same heap, not a smaller one.
+        let tiny = ArrayHeap::new(dir.path(), ArrayHeapConfig { memory_bytes: 1 }).unwrap();
+        assert_eq!(tiny.run_size(), h.run_size());
     }
 
     #[test]

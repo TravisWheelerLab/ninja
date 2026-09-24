@@ -9,11 +9,13 @@
 //!   [`CandidateHeap`] (also disk-backed) that is later scanned under a
 //!   bound derived from the drift in row sums.
 
+pub mod budget;
 mod candidate_heap;
 pub mod matrix;
 
 use std::path::{Path, PathBuf};
 
+pub use budget::{MemoryPlan, MIN_MEMORY_BYTES};
 pub use candidate_heap::CandidateHeap;
 pub use matrix::DiskMatrix;
 
@@ -30,27 +32,30 @@ use super::{ActiveList, NjParams, NjStats};
 const COMPLEX_CANDIDATE_RATIO: usize = 40;
 /// Minimum candidate count before a candidate heap is considered.
 const CAND_HEAP_THRESH: usize = 50_000;
-/// Hard cap on the candidate list regardless of ratio.
-const SIMPLE_CANDIDATE_CAP: usize = 2_000_000;
+/// Hard cap on the candidate list regardless of ratio; the memory plan may
+/// lower it.
+pub(crate) const SIMPLE_CANDIDATE_CAP: usize = 2_000_000;
 /// A candidate heap that shrinks below this fraction of its original size
 /// is dissolved back into the candidate list.
 const CAND_HEAP_DECAY: f32 = 0.6;
 /// Maximum number of live candidate heaps; the oldest are merged into the
-/// newest when exceeded.
-const MAX_CAND_HEAPS: usize = 100;
+/// newest when exceeded. The memory plan may lower it.
+pub(crate) const MAX_CAND_HEAPS: usize = 100;
 const MERGE_OLDEST: usize = 20;
 
 /// Build a tree with the external-memory engine.
 ///
 /// `tmp_dir` receives the scratch files (one per cluster pair plus one per
 /// candidate heap); they are removed when the build finishes.
-/// `memory_bytes` sizes the per-heap buffers.
+/// `plan` is the division of the memory budget; build it with
+/// [`MemoryPlan::new`] so that the matrix window and the heaps are sized
+/// from the same budget.
 pub fn build(
     names: &[String],
     m: DiskMatrix,
     params: &NjParams,
     tmp_dir: &Path,
-    memory_bytes: u64,
+    plan: &MemoryPlan,
 ) -> Result<(Tree, NjStats)> {
     let k = m.k;
     if names.len() != k {
@@ -66,7 +71,7 @@ pub fn build(
     } else {
         params.clone()
     };
-    let mut b = Builder::new(names, m, &params, tmp_dir, memory_bytes)?;
+    let mut b = Builder::new(names, m, &params, tmp_dir, plan)?;
     b.run()?;
     Ok((b.tree, b.stats))
 }
@@ -87,6 +92,9 @@ struct Builder<'a> {
     cand_heap_config: ArrayHeapConfig,
 
     clust_cnt: usize,
+    /// Division of the memory budget; limits how many candidate structures
+    /// may be live at once.
+    plan: MemoryPlan,
     clust_assign: Vec<u32>,
     clust_maxes: Vec<f64>,
     clusters_by_size: Vec<u32>,
@@ -116,7 +124,7 @@ impl<'a> Builder<'a> {
         mut m: DiskMatrix,
         params: &'a NjParams,
         tmp_dir: &Path,
-        memory_bytes: u64,
+        plan: &MemoryPlan,
     ) -> Result<Self> {
         let k = m.k;
         let total = 2 * k - 1;
@@ -124,7 +132,7 @@ impl<'a> Builder<'a> {
         for (i, slot) in redirect.iter_mut().enumerate().take(k) {
             *slot = i as i32;
         }
-        let cc = params.cluster_count;
+        let cc = plan.cluster_count;
         let r = std::mem::take(&mut m.r);
         let mut b = Builder {
             k,
@@ -135,11 +143,10 @@ impl<'a> Builder<'a> {
             redirect,
             active: ActiveList::new(total),
             tmp_dir: tmp_dir.to_path_buf(),
-            // About 3 MB per cluster-pair heap and 2 MB per candidate heap
-            // at the reference's 2 GB budget.
-            heap_config: ArrayHeapConfig { memory_bytes: (memory_bytes / 666).max(1 << 20) },
-            cand_heap_config: ArrayHeapConfig { memory_bytes: (memory_bytes / 1000).max(1 << 20) },
+            heap_config: ArrayHeapConfig { memory_bytes: plan.per_pair_heap },
+            cand_heap_config: ArrayHeapConfig { memory_bytes: plan.per_cand_heap },
             clust_cnt: cc,
+            plan: *plan,
             clust_assign: vec![0; k],
             clust_maxes: vec![0.0; cc],
             clusters_by_size: vec![0; cc],
@@ -353,7 +360,7 @@ impl<'a> Builder<'a> {
         }
         let cand_cnt =
             (self.last_cand + 1) as usize - self.free_cands.len().min((self.last_cand + 1) as usize);
-        let freeze = cand_cnt >= SIMPLE_CANDIDATE_CAP
+        let freeze = cand_cnt >= self.plan.cand_list_cap
             || (cand_cnt >= CAND_HEAP_THRESH && cand_cnt / self.new_k > COMPLEX_CANDIDATE_RATIO);
         if !freeze {
             self.append_simple(d, i, j);
@@ -382,8 +389,10 @@ impl<'a> Builder<'a> {
         self.last_cand = -1;
         self.free_cands.clear();
 
-        if self.cand_heaps.len() == MAX_CAND_HEAPS {
-            for _ in 0..MERGE_OLDEST {
+        if self.cand_heaps.len() >= self.plan.max_cand_heaps {
+            // A small budget allows fewer heaps than MERGE_OLDEST; drain
+            // what is there.
+            for _ in 0..MERGE_OLDEST.min(self.cand_heaps.len()) {
                 let mut old = self.cand_heaps.remove(0);
                 while let Some((i, j, qp)) = old.peek() {
                     let ri = self.redirect[i as usize];
@@ -782,7 +791,10 @@ mod tests {
 
     #[test]
     fn recovers_random_additive_trees_on_disk() {
-        for (n, seed, memory) in [(10, 1u64, 1u64 << 30), (60, 2, 1 << 30), (700, 3, 1), (1200, 4, 1 << 16)] {
+        // `window` is handed to the matrix directly, so that the last two
+        // cases page from disk; the engine's own structures get a plan made
+        // from the same figure, which raises it to the minimum budget.
+        for (n, seed, window) in [(10, 1u64, 1u64 << 30), (60, 2, 1 << 30), (700, 3, 1), (1200, 4, 1 << 16)] {
             let t = random_tree(n, seed);
             let d = t.distances();
             let mut lower = Vec::with_capacity(n);
@@ -792,10 +804,12 @@ mod tests {
             let names: Vec<String> = (0..n).map(|i| i.to_string()).collect();
             let p = PhylipMatrix { names: names.clone(), lower };
             let dir = tempfile::tempdir().unwrap();
-            let m = DiskMatrix::from_phylip(&p, memory, dir.path()).unwrap();
+            let m = DiskMatrix::from_phylip(&p, window, dir.path()).unwrap();
             assert_eq!(m.uses_disk(), n > 513, "n = {}", n);
             let params = NjParams { verbose: 0, rebuild_steps: Some(n / 3 + 1), ..Default::default() };
-            let (tree, _) = build(&names, m, &params, dir.path(), memory.max(1 << 20)).unwrap();
+            let plan =
+                MemoryPlan::new(n, params.cluster_count, window, 0, MAX_CAND_HEAPS, SIMPLE_CANDIDATE_CAP);
+            let (tree, _) = build(&names, m, &params, dir.path(), &plan).unwrap();
             assert_eq!(tree_splits(&tree), t.splits(), "n = {}", n);
         }
     }

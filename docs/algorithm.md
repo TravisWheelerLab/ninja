@@ -188,6 +188,20 @@ the graph whose edges are pairs at distance at most the cutoff, so it is
 computed with a union-find over pairs as their distances are produced, a
 chunk of rows at a time in parallel, and no matrix is kept.
 
+## Memory budget
+
+`--memory` bounds the external-memory engine rather than scaling it. The
+per-taxon structures that cannot shrink come off the top: the tree arena and
+its names, the redirect table, the active list, the row sums and the cluster
+assignments, about 176 bytes per taxon. What is left is divided three tenths
+to the resident matrix window, one tenth to the scratch that fills it, two
+tenths to the candidate list and candidate heaps, and the rest among the
+`c(c+1)/2` cluster-pair heaps, each of which sizes its runs from its own
+allowance. If that leaves a heap less than a megabyte, the cluster count `c`
+is reduced until it does not, down to four clusters; fewer clusters mean
+looser bounds and more work per join, which is the trade a small budget
+buys. The narrowest matrix window is 64 columns.
+
 ## Identical sequences
 
 Sequences with identical residues are grouped before any distance is

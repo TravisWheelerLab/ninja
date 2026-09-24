@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+* The `--memory` budget now bounds what the external-memory engine uses.
+  The engine used to size three structures without multiplying by how many
+  of each it allocated, so a 100 MB budget took 309 MB at 20,000 taxa and
+  1.06 GB at 100,000. At 20,000 taxa the budget now holds, at 76 MB. At
+  100,000 taxa 100 MB is not achievable: the tree, the index structures and
+  the narrowest useful window need 121 MB between them, and a run there uses
+  about 136 MB. The engine reports that shortfall when it starts. ninja
+  raises a budget below 100 MB to 100 MB and warns.
+* A tight budget buys fewer clusters: rather than starve every cluster-pair
+  heap, the engine reduces the cluster count until each heap has a megabyte
+  to work with, and says so under `--verbose`.
+
 * Identical sequences are collapsed by default: the tree is built over one
   representative of each set and the duplicates hang off it as zero-length
   branches. `--no_collapse_identical` restores the old behaviour. Only the

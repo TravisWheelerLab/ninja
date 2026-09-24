@@ -9,7 +9,7 @@ use crate::cluster;
 use crate::distance::{DistanceCalculator, DistanceMatrix, SubstitutionMatrix};
 use crate::error::{Error, Result};
 use crate::io::{fasta, phylip, resolve_duplicates, DuplicateNames, Renamed};
-use crate::nj::extmem::DiskMatrix;
+use crate::nj::extmem::{DiskMatrix, MemoryPlan};
 use crate::nj::{self, Method, NjParams, NjStats};
 use crate::tree::Tree;
 
@@ -198,14 +198,15 @@ pub fn run(opts: &Options, out: &mut dyn Write) -> Result<RunOutput> {
             match method {
                 Method::ExtMem => {
                     let tmp = scratch_dir(opts)?;
-                    let m = DiskMatrix::from_calculator(&calc, opts.memory_bytes, tmp.path())?;
+                    let plan = extmem_plan(opts, k, alignment_bytes(&aln), verbose);
+                    let m = DiskMatrix::from_calculator(&calc, &plan, tmp.path())?;
                     if verbose >= 1 {
                         eprintln!("Distances computed ({:.1?})", t0.elapsed());
                     }
                     let names = aln.names;
                     drop(aln.seqs);
                     drop(calc);
-                    let mut r = build_extmem(opts, &names, m, k, t0, &tmp)?;
+                    let mut r = build_extmem(opts, &names, m, k, t0, &tmp, &plan)?;
                     finish_tree(opts, out, &mut r, groups.as_deref(), all_names.as_deref(), t0)?;
                     Ok(r)
                 }
@@ -247,8 +248,9 @@ pub fn run(opts: &Options, out: &mut dyn Write) -> Result<RunOutput> {
             match method {
                 Method::ExtMem => {
                     let tmp = scratch_dir(opts)?;
-                    let m = DiskMatrix::from_phylip(&p, opts.memory_bytes, tmp.path())?;
-                    let mut r = build_extmem(opts, &p.names, m, k, t0, &tmp)?;
+                    let plan = extmem_plan(opts, k, phylip_bytes(&p), verbose);
+                    let m = DiskMatrix::from_phylip(&p, plan.window_bytes, tmp.path())?;
+                    let mut r = build_extmem(opts, &p.names, m, k, t0, &tmp, &plan)?;
                     finish_tree(opts, out, &mut r, None, None, t0)?;
                     Ok(r)
                 }
@@ -310,6 +312,46 @@ fn finish_tree(
     Ok(())
 }
 
+/// Bytes the alignment holds while the distance matrix is built: the rows
+/// themselves, the names, and the packed copy the calculator keeps, which
+/// costs at most another byte per residue (protein; DNA packs to a quarter
+/// of that).
+fn alignment_bytes(aln: &fasta::Alignment) -> u64 {
+    let seqs: u64 = aln.seqs.iter().map(|s| s.len() as u64 + 24).sum();
+    let names: u64 = aln.names.iter().map(|n| n.len() as u64 + 24).sum();
+    2 * seqs + names
+}
+
+/// Bytes a parsed Phylip matrix holds while the disk matrix is built.
+fn phylip_bytes(p: &phylip::PhylipMatrix) -> u64 {
+    p.lower.iter().map(|r| r.len() as u64 * 8 + 24).sum::<u64>()
+        + p.names.iter().map(|n| n.len() as u64 + 24).sum::<u64>()
+}
+
+/// Divide the memory budget, reporting anything the plan had to change.
+///
+/// `input_bytes` is what the alignment or parsed matrix occupies while the
+/// distance matrix is built; the engine cannot free it, so it comes out of
+/// the budget before anything is handed out.
+fn extmem_plan(opts: &Options, k: usize, input_bytes: u64, verbose: u8) -> MemoryPlan {
+    let plan = MemoryPlan::new(
+        k,
+        opts.nj.cluster_count,
+        opts.memory_bytes,
+        input_bytes,
+        crate::nj::extmem::MAX_CAND_HEAPS,
+        crate::nj::extmem::SIMPLE_CANDIDATE_CAP,
+    );
+    for (i, note) in plan.notes(opts.memory_bytes, opts.nj.cluster_count).iter().enumerate() {
+        // The first note is a warning about the budget itself, which is
+        // worth printing even when quiet.
+        if i == 0 && plan.budget_raised || verbose >= 1 {
+            eprintln!("{note}");
+        }
+    }
+    plan
+}
+
 fn build_extmem(
     opts: &Options,
     names: &[String],
@@ -317,6 +359,7 @@ fn build_extmem(
     k: usize,
     t0: Instant,
     tmp: &tempfile::TempDir,
+    plan: &MemoryPlan,
 ) -> Result<RunOutput> {
     let verbose = opts.nj.verbose;
     if verbose >= 1 {
@@ -326,7 +369,7 @@ fn build_extmem(
             if m.uses_disk() { "partly on disk" } else { "resident" }
         );
     }
-    let (tree, stats) = nj::extmem::build(names, m, &opts.nj, tmp.path(), opts.memory_bytes)?;
+    let (tree, stats) = nj::extmem::build(names, m, &opts.nj, tmp.path(), plan)?;
     if verbose >= 1 {
         eprintln!("Tree built ({:.1?})", t0.elapsed());
     }

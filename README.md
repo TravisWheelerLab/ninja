@@ -95,6 +95,16 @@ and the external-memory engine otherwise. Force one with `-m inmem` or
 `--tmp_dir` (the system temporary directory by default); on a cluster,
 point it at a local disk.
 
+The external-memory engine keeps its resident memory inside `--memory`. The
+budget covers the matrix window, the scratch used to fill it, the
+cluster-pair heaps, the candidate structures and the per-taxon tables, and
+it is divided by the number of structures rather than applied to each one.
+The smallest budget accepted is 100 MB, and a smaller request is raised to
+it with a warning. When the budget is tight, ninja reduces the cluster count
+so that each cluster-pair heap still has room to work, and says so under
+`--verbose`; very many taxa may need more than the budget for the tree
+alone, and ninja says that too rather than quietly overrunning.
+
 ### Performance
 
 Simulated alignments of 300 columns on a 192-core machine. Wall time and
