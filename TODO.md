@@ -40,6 +40,11 @@ Planned work, roughly in order.
 - Measure what reducing the cluster count under a tight budget costs. It drops from 30 to 7
   at 20,000 taxa and to 4 at 100,000; fewer clusters mean looser bounds and more work per
   join, and nobody has measured it. Raised 2026-09-22.
+- [x] 2026-09-24: A 100,000-taxon run completes: 51m56s, 128 MB peak, 99,999 joins, a tree
+  with 100,000 distinct labels. It had never finished before; see the freeze hang below.
+- [x] 2026-09-24: Fixed the hang in the candidate-heap drain (appending from inside the
+  loop over `cand_heaps` re-indexed it and, with one heap allowed, fed pairs straight back
+  into the heap they came from). Regression test added; verified it hangs without the fix.
 - Get a 20,000-taxon external-memory time on an unloaded machine. Runs this session ranged
   from 80 s to 445 s depending on other users' load. Raised 2026-09-22.
 - Find a way to run multi-hour jobs that the harness watchdog will not kill. It killed the

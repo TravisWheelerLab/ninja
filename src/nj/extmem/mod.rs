@@ -428,6 +428,9 @@ impl<'a> Builder<'a> {
         let mut max_t2val = vec![f64::MIN_POSITIVE; cc];
         let mut horiz: Vec<f32> = Vec::new();
 
+        // Candidates drained from the frozen heaps, appended once the
+        // loop over those heaps has finished (see below).
+        let mut drained: Vec<(f32, i32, i32)> = Vec::new();
         while self.next_internal < total {
             let next_i32 = self.next_internal as i32;
             let new_k = self.new_k;
@@ -539,6 +542,13 @@ impl<'a> Builder<'a> {
 
             // Candidate heaps, newest first.
             let mut expired_exists = false;
+            // Appending a candidate can freeze the candidate list, and
+            // freezing merges the oldest heaps away and pushes a new one.
+            // Doing that from inside this loop re-indexes `cand_heaps`
+            // underneath it, and where the budget allows only one heap the
+            // entries popped here go straight back into the heap they came
+            // from, which never ends. Collect them and append afterwards.
+            drained.clear();
             for c in (0..self.cand_heaps.len()).rev() {
                 self.cand_heaps[c].calc_deltas(new_k, &self.redirect, &self.r);
                 while let Some((i, j, qp)) = self.cand_heaps[c].peek() {
@@ -556,7 +566,7 @@ impl<'a> Builder<'a> {
                     }
                     let d = self.cand_heaps[c].distance(qp, ri as usize, rj as usize);
                     let q = d as f64 * nk2 - self.r[ri as usize] - self.r[rj as usize];
-                    self.append_candidate(d, i, j)?;
+                    drained.push((d, i, j));
                     if q <= min_q {
                         min_i = i;
                         min_j = j;
@@ -570,6 +580,11 @@ impl<'a> Builder<'a> {
                     expired_exists = true;
                 }
             }
+            for idx in 0..drained.len() {
+                let (d, i, j) = drained[idx];
+                self.append_candidate(d, i, j)?;
+            }
+            drained.clear();
             if expired_exists {
                 for c in (0..self.cand_heaps.len()).rev() {
                     if !self.cand_heaps[c].expired {
@@ -811,6 +826,40 @@ mod tests {
                 MemoryPlan::new(n, params.cluster_count, window, 0, MAX_CAND_HEAPS, SIMPLE_CANDIDATE_CAP);
             let (tree, _) = build(&names, m, &params, dir.path(), &plan).unwrap();
             assert_eq!(tree_splits(&tree), t.splits(), "n = {}", n);
+        }
+    }
+
+    /// The candidate list freezing into a heap used to be reachable only on
+    /// inputs far larger than any test, and it did not work: appending a
+    /// candidate from inside the loop over the frozen heaps re-indexed that
+    /// vector, and where the budget allowed a single heap the entries popped
+    /// went straight back into the heap they came from, so a 100,000-taxon
+    /// run spun on one core forever. Force a freeze on every size here.
+    #[test]
+    fn recovers_trees_when_the_candidate_list_keeps_freezing() {
+        for (n, seed, heaps, cap) in
+            [(60usize, 2u64, 1usize, 4usize), (700, 3, 1, 8), (700, 5, 2, 32), (1200, 4, 1, 16)]
+        {
+            let t = random_tree(n, seed);
+            let d = t.distances();
+            let mut lower = Vec::with_capacity(n);
+            for i in 0..n {
+                lower.push((0..i).map(|j| (d[i][j] * 1e8).round() as i64).collect::<Vec<_>>());
+            }
+            let names: Vec<String> = (0..n).map(|i| i.to_string()).collect();
+            let p = PhylipMatrix { names: names.clone(), lower };
+            let dir = tempfile::tempdir().unwrap();
+            let window = 1u64 << 16;
+            let m = DiskMatrix::from_phylip(&p, window, dir.path()).unwrap();
+            let params = NjParams { verbose: 0, rebuild_steps: Some(n / 3 + 1), ..Default::default() };
+            let base =
+                MemoryPlan::new(n, params.cluster_count, window, 0, MAX_CAND_HEAPS, SIMPLE_CANDIDATE_CAP);
+            // Below the floor `MemoryPlan::new` puts on the candidate list,
+            // so that the list freezes many times over a short run.
+            let plan = MemoryPlan { max_cand_heaps: heaps, cand_list_cap: cap, ..base };
+            let (tree, stats) = build(&names, m, &params, dir.path(), &plan).unwrap();
+            assert_eq!(tree_splits(&tree), t.splits(), "n = {} heaps = {}", n, heaps);
+            assert!(stats.candidates_added > 0, "n = {}", n);
         }
     }
 }

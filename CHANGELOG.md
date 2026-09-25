@@ -10,6 +10,18 @@
   the narrowest useful window need 121 MB between them, and a run there uses
   about 136 MB. The engine reports that shortfall when it starts. ninja
   raises a budget below 100 MB to 100 MB and warns.
+* Fixed a hang that stopped large runs finishing. The engine drained the
+  frozen candidate heaps and appended each surviving pair back to the
+  candidate list, and appending can freeze that list, which merges the
+  oldest heaps away and pushes a new one. Doing that from inside the loop
+  over those heaps re-indexed the vector underneath it, and where the budget
+  allowed a single heap the pair just taken out went straight back into the
+  heap it came from. A 100,000-taxon run never finished, spinning on one
+  core without completing another join; it now takes 52 minutes. ninja
+  collects the candidates and appends them once the loop has finished. Only
+  a candidate list long enough to freeze reaches this code, which takes
+  around 100,000 taxa at a small budget, so no test covered it; one does
+  now.
 * A tight budget buys fewer clusters: rather than starve every cluster-pair
   heap, the engine reduces the cluster count until each heap has a megabyte
   to work with, and says so under `--verbose`.
