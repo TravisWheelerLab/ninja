@@ -2,7 +2,7 @@
 
 This is a summary of the method described in Wheeler (2009), "Large-scale
 neighbor-joining with NINJA", written from the point of view of this
-implementation. Section headings name the modules that carry each part.
+implementation. Section headings name the modules that implement each part.
 
 ## Neighbor joining
 

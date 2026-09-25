@@ -74,5 +74,5 @@ sequences. All three are here, with these differences:
 * **Collapsing identical sequences** was dead code on the branch (tree
   output was disabled there). Here it is the default, and
   `--no_collapse_identical` turns it off.
-* The branch's `--print-times` flag and `-v` for version are not carried
+* The branch's `--print-times` flag and `-v` for version are not kept
   over; `--verbose` reports timings.

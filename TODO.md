@@ -7,7 +7,7 @@ Planned work, roughly in order.
   below); what remains is to keep it stable across releases, document every
   public item with an example, and decide whether to offer C and Python
   bindings.
-- Write a code example for each public item. All 258 items carried a doc
+- Write a code example for each public item. All 258 items had a doc
   comment, enforced by `missing_docs`, but not one had a ```-fenced example;
   the only runnable ones are the two at the crate level in `src/lib.rs`.
   Roughly 70 items remain public after the narrowing. Raised 2026-09-23.

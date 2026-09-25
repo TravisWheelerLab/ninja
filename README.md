@@ -34,7 +34,7 @@ Build a tree from a FASTA alignment:
 
 A record's name is its header up to the first space or tab. If two records
 share a name, ninja renames the later ones `name_2`, `name_3`, ... and lists
-the changes on standard error, so no tree carries the same label twice.
+the changes on standard error, so no tree has the same label twice.
 ninja also warns about names that contain `#`: viewers that read extended
 Newick, such as IcyTree and Dendroscope, take `name#tag` as a reticulation
 node and show the tree as a network.
