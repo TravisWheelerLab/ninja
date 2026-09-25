@@ -342,10 +342,14 @@ fn extmem_plan(opts: &Options, k: usize, input_bytes: u64, verbose: u8) -> Memor
         crate::nj::extmem::MAX_CAND_HEAPS,
         crate::nj::extmem::SIMPLE_CANDIDATE_CAP,
     );
-    for (i, note) in plan.notes(opts.memory_bytes, opts.nj.cluster_count).iter().enumerate() {
-        // The first note is a warning about the budget itself, which is
-        // worth printing even when quiet.
-        if i == 0 && plan.budget_raised || verbose >= 1 {
+    // Warnings about the budget print even when quiet: a run that silently
+    // uses more memory than it was given is the thing the user most needs
+    // to hear about.
+    for note in plan.warnings(opts.memory_bytes) {
+        eprintln!("{note}");
+    }
+    if verbose >= 1 {
+        for note in plan.notes(opts.nj.cluster_count) {
             eprintln!("{note}");
         }
     }

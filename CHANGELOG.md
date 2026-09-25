@@ -7,9 +7,9 @@
   of each it allocated, so a 100 MB budget took 309 MB at 20,000 taxa and
   1.06 GB at 100,000. At 20,000 taxa the budget now holds, at 76 MB. At
   100,000 taxa 100 MB is not achievable: the tree, the index structures and
-  the narrowest useful window need 121 MB between them, and a run there uses
-  about 136 MB. The engine reports that shortfall when it starts. ninja
-  raises a budget below 100 MB to 100 MB and warns.
+  the narrowest usable window need 121 MB between them, so ninja raises the
+  budget to that, and the run peaks at 128 MB. A budget below 100 MB it
+  raises to 100 MB, with a warning.
 * Fixed a hang that stopped large runs finishing. The engine drained the
   frozen candidate heaps and appended each surviving pair back to the
   candidate list, and appending can freeze that list, which merges the
@@ -22,6 +22,16 @@
   a candidate list long enough to freeze reaches this code, which takes
   around 100,000 taxa at a small budget, so no test covered it; one does
   now.
+* ninja raises a budget too small for the taxon count. It used to warn that
+  it needed more and carry on regardless, so `--memory` bounded nothing at
+  the point where a bound was worth having. It now raises the budget to what
+  the tree, the index structures and the narrowest usable window need, and
+  keeps the cluster count it had settled on, since a larger budget would
+  otherwise buy more cluster-pair heaps and pull the requirement up again.
+* Budget warnings print even under `--quiet`. The test meant to keep them
+  visible fired only when the budget had been raised to the 100 MB minimum.
+  A run that needed more memory than it was given therefore said nothing,
+  which is the one case where the warning matters.
 * A tight budget buys fewer clusters: rather than starve every cluster-pair
   heap, the engine reduces the cluster count until each heap has a megabyte
   to work with, and says so under `--verbose`.

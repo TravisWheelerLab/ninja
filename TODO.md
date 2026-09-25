@@ -37,14 +37,27 @@ Planned work, roughly in order.
   floor understates what large inputs need. Raised 2026-09-22.
 - The budget split (7/20 window, 1/10 build scratch, 3/20 candidate structures, the rest to
   cluster-pair heaps) is a guess, not a measured optimum. Raised 2026-09-22.
-- Measure what reducing the cluster count under a tight budget costs. It drops from 30 to 7
-  at 20,000 taxa and to 4 at 100,000; fewer clusters mean looser bounds and more work per
-  join, and nobody has measured it. Raised 2026-09-22.
+- [x] 2026-09-24: Measured what a tight budget costs. Against a roomy configuration it is
+  about 1.4x, flat with size: 1.45x at 20,000 taxa and 1.38x at 50,000. The cluster count
+  is most of it (4 to 30 clusters buys 26%); window width buys 13% at 20,000 taxa, and
+  4096 columns was no better than 1024 at 50,000. Keeping all 30 clusters at 100,000 taxa
+  would need about 1.24 GB against today's 121 MB, so roughly 10x the memory for 1.4x the
+  speed. Travis decided to keep the floor at feasibility. Note the caveat: this machine
+  holds the whole matrix file in page cache, so a window miss costs a syscall rather than a
+  seek; on a memory-tight machine the window would matter more, and dropping the page cache
+  needs root.
+- Consider a verbose line saying how much more memory would buy, so the 1.4x is visible
+  rather than hidden. Raised 2026-09-24.
+- The plan still under-accounts by about 6%: at 100,000 taxa it raises the budget to 121 MB
+  and the run peaks at 128 MB. Raised 2026-09-24.
 - [x] 2026-09-24: A 100,000-taxon run completes: 51m56s, 128 MB peak, 99,999 joins, a tree
   with 100,000 distinct labels. It had never finished before; see the freeze hang below.
 - [x] 2026-09-24: Fixed the hang in the candidate-heap drain (appending from inside the
   loop over `cand_heaps` re-indexed it and, with one heap allowed, fed pairs straight back
   into the heap they came from). Regression test added; verified it hangs without the fix.
+- Benchmark and probe runs must cap worker threads (`ninja -T N`, or a rayon pool in a test
+  binary). The distance step otherwise takes all 192 cores on this shared machine, which
+  disrupts other users. Raised 2026-09-24.
 - Get a 20,000-taxon external-memory time on an unloaded machine. Runs this session ranged
   from 80 s to 445 s depending on other users' load. Raised 2026-09-22.
 - Find a way to run multi-hour jobs that the harness watchdog will not kill. It killed the

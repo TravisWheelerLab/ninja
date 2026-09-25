@@ -60,6 +60,9 @@ pub struct MemoryPlan {
     pub clusters_reduced: bool,
     /// Whether the requested budget was raised to the minimum.
     pub budget_raised: bool,
+    /// Whether the budget was raised again because this many taxa need more
+    /// than the minimum for the structures they cannot do without.
+    pub size_raised: bool,
     /// Least this many taxa can be built in, whatever the budget: the
     /// per-taxon structures, the narrowest window, the fewest clusters and
     /// one candidate heap.
@@ -87,7 +90,40 @@ impl MemoryPlan {
         cand_heap_cap: usize,
         cand_list_cap: usize,
     ) -> Self {
-        let budget = memory_bytes.max(MIN_MEMORY_BYTES);
+        let floored = memory_bytes.max(MIN_MEMORY_BYTES);
+        let first = Self::divide(k, cluster_count, floored, input_bytes, cand_heap_cap, cand_list_cap);
+        // A budget under what the unavoidable structures need leaves the
+        // engine thrashing a window of a few dozen columns, so raise it to
+        // what they need. The cluster count it settled on is pinned, since
+        // a larger budget would otherwise buy more cluster-pair heaps and
+        // push the requirement up again.
+        let mut plan = if first.budget_short {
+            Self::divide(
+                k,
+                first.cluster_count,
+                first.min_required,
+                input_bytes,
+                cand_heap_cap,
+                cand_list_cap,
+            )
+        } else {
+            first
+        };
+        plan.budget_raised = memory_bytes < MIN_MEMORY_BYTES;
+        plan.size_raised = plan.budget > floored;
+        plan.clusters_reduced = plan.cluster_count < cluster_count;
+        plan
+    }
+
+    /// One pass of the division, with the budget already settled.
+    fn divide(
+        k: usize,
+        cluster_count: usize,
+        budget: u64,
+        input_bytes: u64,
+        cand_heap_cap: usize,
+        cand_list_cap: usize,
+    ) -> Self {
         let k64 = k as u64;
         let fixed = FIXED_PER_TAXON * k64 + input_bytes;
         // Never let the per-taxon structures swallow the whole budget: the
@@ -141,31 +177,44 @@ impl MemoryPlan {
             cand_list_cap: cand_list_cap.min((list_share / CAND_ENTRY_BYTES) as usize).max(1024),
             cluster_count: cc,
             clusters_reduced: cc < cluster_count,
-            budget_raised: memory_bytes < MIN_MEMORY_BYTES,
+            budget_raised: false,
+            size_raised: false,
             min_required,
             budget_short: min_required > budget,
         }
     }
 
     /// Lines describing any adjustment, for `--verbose`.
-    pub fn notes(&self, requested: u64, requested_clusters: usize) -> Vec<String> {
+    pub fn warnings(&self, requested: u64) -> Vec<String> {
         let mut out = Vec::new();
         if self.budget_raised {
             out.push(format!(
                 "warning: a memory budget of {} MB is below the {} MB minimum; using {} MB",
                 requested / (1 << 20),
                 MIN_MEMORY_BYTES / (1 << 20),
-                self.budget / (1 << 20)
+                requested.max(MIN_MEMORY_BYTES) / (1 << 20)
+            ));
+        }
+        if self.size_raised {
+            out.push(format!(
+                "warning: this many taxa need at least {} MB for the tree, the index structures \
+                 and the narrowest usable matrix window; raising the budget from {} MB to that",
+                self.budget.div_ceil(1 << 20),
+                requested.max(MIN_MEMORY_BYTES) / (1 << 20)
             ));
         }
         if self.budget_short {
             out.push(format!(
-                "warning: this many taxa need at least {} MB for the tree, the index structures \
-                 and the narrowest usable matrix window; the run will exceed the {} MB budget",
-                self.min_required.div_ceil(1 << 20),
+                "warning: even {} MB is short of what this many taxa need; the run will exceed it",
                 self.budget / (1 << 20)
             ));
         }
+        out
+    }
+
+    /// Notes worth printing only when the run is not quiet.
+    pub fn notes(&self, requested_clusters: usize) -> Vec<String> {
+        let mut out = Vec::new();
         if self.clusters_reduced {
             out.push(format!(
                 "Reduced the cluster count from {} to {} so that each of the {} cluster-pair \
@@ -211,13 +260,9 @@ mod tests {
         for k in [1_000, 20_000, 100_000, 1_000_000] {
             for gb in [0.1, 0.5, 2.0, 10.0] {
                 let p = plan(k, gb);
-                if p.budget_short {
-                    // Too many taxa for the budget whatever we do; the plan
-                    // says so instead of pretending to fit.
-                    assert!(p.min_required > p.budget, "k={k} gb={gb}");
-                    assert!(p.notes(0, 30).iter().any(|n| n.contains("will exceed")), "k={k}");
-                    continue;
-                }
+                // A budget too small for the taxon count is raised, not
+                // overrun, so every plan fits the budget it reports.
+                assert!(!p.budget_short, "k={k} gb={gb}");
                 assert!(accounted(&p, k) <= p.budget, "k={k} gb={gb}: {} > {}", accounted(&p, k), p.budget);
             }
         }
@@ -236,12 +281,18 @@ mod tests {
     }
 
     #[test]
-    fn a_million_taxa_do_not_fit_in_the_minimum_budget() {
+    fn a_million_taxa_raise_the_minimum_budget() {
         let p = plan(1_000_000, 0.1);
-        assert!(p.budget_short);
-        // The tree and index structures alone are over 170 MB.
-        assert!(p.min_required > 170 << 20, "{}", p.min_required);
-        assert!(!plan(1_000_000, 10.0).budget_short);
+        // The tree and index structures alone are over 170 MB, so the
+        // budget is raised to cover them rather than quietly overrun.
+        assert!(p.size_raised);
+        assert!(!p.budget_short, "the raised budget covers the minimum");
+        assert!(p.budget > 170 << 20, "{}", p.budget);
+        assert!(p.budget >= p.min_required, "{} < {}", p.budget, p.min_required);
+        let w = p.warnings((0.1 * (1u64 << 30) as f64) as u64);
+        assert!(w.iter().any(|n| n.contains("raising the budget")), "{w:?}");
+        let roomy = plan(1_000_000, 10.0);
+        assert!(!roomy.size_raised && !roomy.budget_short);
     }
 
     #[test]
@@ -250,8 +301,8 @@ mod tests {
         assert!(p.budget_raised);
         assert_eq!(p.budget, MIN_MEMORY_BYTES);
         assert!(!plan(20_000, 2.0).budget_raised);
-        let notes = p.notes((0.01 * (1u64 << 30) as f64) as u64, 30);
-        assert!(notes[0].contains("below the 100 MB minimum"), "{notes:?}");
+        let w = p.warnings((0.01 * (1u64 << 30) as f64) as u64);
+        assert!(w[0].contains("below the 100 MB minimum"), "{w:?}");
     }
 
     #[test]
@@ -262,7 +313,7 @@ mod tests {
         assert!(tight.cluster_count >= MIN_CLUSTERS);
         assert_eq!(roomy.cluster_count, 30, "a roomy budget keeps every cluster asked for");
         assert!(tight.clusters_reduced && !roomy.clusters_reduced);
-        assert!(tight.notes(0, 30)[0].contains("Reduced the cluster count from 30"));
+        assert!(tight.notes(30)[0].contains("Reduced the cluster count from 30"));
     }
 
     #[test]
