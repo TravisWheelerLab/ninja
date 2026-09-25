@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.0-rc.4 (2026-09-25)
 
 * The `--memory` budget now bounds what the external-memory engine uses.
   The engine used to size three structures without multiplying by how many
