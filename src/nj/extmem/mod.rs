@@ -16,7 +16,7 @@ mod matrix;
 
 use std::path::{Path, PathBuf};
 
-pub use budget::{MemoryPlan, MIN_MEMORY_BYTES};
+pub use budget::MemoryPlan;
 pub use matrix::DiskMatrix;
 
 use matrix::RowPager;

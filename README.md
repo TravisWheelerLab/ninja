@@ -18,11 +18,9 @@ improvements to sequence distance computation.
 
 From crates.io, with a Rust toolchain (1.85 or later):
 
-    cargo install ninja-phylo --version 2.0.0-rc.3
+    cargo install ninja-phylo
 
-which installs a binary named `ninja`. Cargo installs a pre-release only
-when the command names it, so the version is required until 2.0.0 is
-final. Or build from a checkout with
+which installs a binary named `ninja`. Or build from a checkout with
 `cargo build --release`; the binary is `target/release/ninja`.
 
 ## Use
@@ -133,8 +131,9 @@ external-memory engine trades that for disk.
 The crate exposes the pieces separately: `io::fasta` and `io::phylip`
 readers and writers, `distance::DistanceCalculator` for pairwise distances
 (with `distance::SubstitutionMatrix` to pick or load a matrix),
-`nj::inmem::build` and `nj::extmem::build` for the search, and `tree::Tree`
-for Newick output. `ninja::run` does what the binary does. See
+`nj::inmem::build` for the search, and `tree::Tree` for Newick output.
+`ninja::run` does what the binary does, and moves to the external-memory
+engine when the matrix will not fit the budget. See
 `examples/library.rs` and the API documentation (`cargo doc --open`).
 
 ## Layout

@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.0.0 (2026-10-05)
+
+Since rc.4; the entries below cover the rest of 2.0.
+
+* ninja counts memory the plan was leaving out: the per-heap staging
+  buffers, the join loop's per-taxon scratch, and the parts of a candidate
+  slot outside the list itself. At 100,000 taxa under `--memory 0.1` it
+  used to raise the budget to 121 MB and then peak at 128 MB; it now plans
+  124 MB and peaks at 126.1 MB. The remaining 1.7% looks like allocator
+  slack and the leaf-name strings, which the plan does not control.
+* ninja reports an unknown `--matrix` name. `--matrix BLOSUM80` used to
+  report that the file BLOSUM80 does not exist. The message named neither
+  of the two matrices that would have worked. ninja now reads a spec with
+  no separator and no extension as a name, and reports an unknown one with
+  the built-ins listed.
+* The external-memory engine is internal. `nj::extmem` is no longer public,
+  nor are the `DiskMatrix` and `MemoryPlan` types its signature needed.
+  `run` moves to that engine on its own when the matrix will not fit the
+  budget, which is how the binary reaches it. Leaving `MemoryPlan`'s fields
+  public would have made any later change to them a breaking change.
+
 ## 2.0.0-rc.4 (2026-09-25)
 
 * The `--memory` budget now bounds what the external-memory engine uses.

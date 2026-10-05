@@ -18,11 +18,11 @@
 //! The in-memory engine ([`inmem`]) keeps the distance matrix as fixed-point
 //! integers and, since it consumes each cluster pair's entries in distance
 //! order with lazy deletion, keeps the bulk inserted at a rebuild as a
-//! sorted run rather than a heap. The external-memory engine ([`extmem`])
-//! stores the matrix as columns of floats, most of them on disk, and
-//! replaces each in-memory heap with a disk-backed one.
+//! sorted run rather than a heap. The external-memory engine stores the
+//! matrix as columns of floats, most of them on disk, and replaces each
+//! in-memory heap with a disk-backed one.
 
-pub mod extmem;
+pub(crate) mod extmem;
 pub mod inmem;
 
 use std::fmt;
