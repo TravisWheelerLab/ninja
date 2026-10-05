@@ -11,11 +11,11 @@ Planned work, roughly in order.
   comment, enforced by `missing_docs`, but not one had a ```-fenced example;
   the only runnable ones are the two at the crate level in `src/lib.rs`.
   Roughly 70 items remain public after the narrowing. Raised 2026-09-23.
-- Settle `SubstitutionMatrix`'s three failure conventions: `blosum62` and
-  `blosum45` panic through `.expect`, `by_name` returns `Option`, and
-  `from_file` and `parse` return `Result` (`src/distance/submat.rs:36-73`).
-  Defensible as it stands, since the compiled-in matrices cannot fail, but
-  worth a decision before the surface is frozen. Raised 2026-09-23.
+- [x] 2026-10-05: Settled `SubstitutionMatrix`'s three failure conventions. They stay
+  as they are (`blosum62`/`blosum45` panic through `.expect`, `by_name` returns
+  `Option`, `from_file`/`parse` return `Result`), which Travis agreed to; the compiled-in
+  matrices cannot fail, and `by_name`'s `None` is a lookup answer rather than an error.
+  The caller was the problem: see the `--matrix` seam fix below.
 - The minimum Rust version (1.85) is set by clap 4.6; CI builds with it.
 - More speed in the in-memory engine. Profile for 20,000 taxa (about
   15 s): heap pushes of each new node's distances 6 s (4 s of it the
@@ -24,8 +24,8 @@ Planned work, roughly in order.
   update loop is bound by cache misses on the triangular matrix.
 - Reduce in-memory engine memory: the queues hold an entry for every pair
   (about 12 bytes each); 104 GB at 100,000 taxa.
-- External-memory engine, 20,000 taxa at a 100 MB budget (time not yet measured on an
-  unloaded machine): level
+- External-memory engine, 20,000 taxa at a 100 MB budget (85.7 s on an idle machine,
+  measured 2026-10-05): level
   merges of the disk heaps dominate, then pulls, the update loop, spill
   sorts and staging pushes. More slots per level would reduce how many
   merges each entry passes through.
@@ -62,6 +62,9 @@ Planned work, roughly in order.
   reports the unknown name and lists the built-ins; `SubstitutionMatrix::names()` keeps
   the message and the `match` in step. The three failure conventions themselves stay as
   they are, which Travis agreed to.
+- [x] 2026-10-05: Released 2.0.0, tagged `v2.0.0` and on crates.io. Made `nj::extmem`
+  internal first, so `MemoryPlan`'s fields are not frozen by the stable API and the
+  accounting can still change in 2.x.
 - [x] 2026-09-25: Released 2.0.0-rc.4, tagged and on crates.io.
 - [x] 2026-09-24: A 100,000-taxon run completes: 51m56s, 128 MB peak, 99,999 joins, a tree
   with 100,000 distinct labels. It had never finished before; see the freeze hang below.
@@ -89,8 +92,9 @@ Planned work, roughly in order.
 - [x] 2026-09-23: Deleting the uncalled `DiskMatrix::prefetch` removed the
   crate's second `unsafe` block, so the claim at `src/lib.rs:45` that there
   is only one is true again.
-- Release 2.0.0 final once the library API review is done. Travis asked for it on
-  2026-09-21 and pulled it back when he saw the open items.
+- [x] 2026-10-05: Released 2.0.0 final. Travis first asked on 2026-09-21 and pulled it
+  back when he saw the open items; the API review finished with the rc.4 narrowing and
+  making `nj::extmem` internal.
 
 - [x] 2026-09-15: `-v` with no value fails ("a value is required for --verbose"); accept a bare `-v` as verbose level 2 (clap default_missing_value). Seen by a colleague 2026-09-14.
 - [x] 2026-09-16, decided against: Quote Newick labels that contain `#` (and any other character outside the plain set): extended-Newick readers such as IcyTree and Dendroscope read `name#tag` as a reticulation node and merge every leaf sharing the tag, so RepeatMasker-style names come out as a network with cycles. Found 2026-09-14. Quoting only helps IcyTree; Dendroscope and SplitsTree strip quotes and still merge labels whose tag starts with H, L or R, so Travis dropped the idea as a hack with little benefit.
