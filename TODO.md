@@ -57,6 +57,11 @@ Planned work, roughly in order.
 - Decide whether the last 1.7% is worth chasing. I think it is allocator slack and the
   leaf-name strings, which the plan neither allocates nor controls, and recommended
   closing it; Travis has not ruled. Raised 2026-09-25.
+- [x] 2026-09-25: Fixed the `--matrix` seam. An unknown built-in name fell through to
+  the file reader, so `--matrix BLOSUM80` complained about a missing file. It now
+  reports the unknown name and lists the built-ins; `SubstitutionMatrix::names()` keeps
+  the message and the `match` in step. The three failure conventions themselves stay as
+  they are, which Travis agreed to.
 - [x] 2026-09-25: Released 2.0.0-rc.4, tagged and on crates.io.
 - [x] 2026-09-24: A 100,000-taxon run completes: 51m56s, 128 MB peak, 99,999 joins, a tree
   with 100,000 distinct labels. It had never finished before; see the freeze hang below.

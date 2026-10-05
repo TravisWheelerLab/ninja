@@ -459,10 +459,23 @@ fn choose_method(opts: &Options, k: usize) -> Method {
 
 /// A built-in matrix by name, else a file in NCBI format.
 fn resolve_matrix(spec: &str) -> Result<SubstitutionMatrix> {
-    match SubstitutionMatrix::by_name(spec) {
-        Some(m) => Ok(m),
-        None => SubstitutionMatrix::from_file(Path::new(spec)),
+    if let Some(m) = SubstitutionMatrix::by_name(spec) {
+        return Ok(m);
     }
+    // Decide which mistake to report. A spec with no separator and no
+    // extension was meant as a name, so say the name is unknown; falling
+    // through to the file reader would complain that BLOSUM80 does not
+    // exist, which says nothing about the two matrices that do.
+    let looks_like_a_path =
+        spec.contains(std::path::MAIN_SEPARATOR) || spec.contains('/') || spec.contains('.');
+    if !looks_like_a_path {
+        return Err(Error::options(format!(
+            "unknown built-in matrix \"{}\"; try {}, or give a path to a matrix file",
+            spec,
+            SubstitutionMatrix::names().join(" or ")
+        )));
+    }
+    SubstitutionMatrix::from_file(Path::new(spec))
 }
 
 /// Report renamed records on standard error at every verbosity, since the

@@ -47,7 +47,16 @@ impl SubstitutionMatrix {
         m
     }
 
-    /// A built-in matrix by name, case-insensitively: `BLOSUM62` or `BLOSUM45`.
+    /// Names [`by_name`](Self::by_name) accepts, for help text and error
+    /// messages, so those cannot drift from what it matches.
+    pub fn names() -> &'static [&'static str] {
+        &["BLOSUM62", "BLOSUM45"]
+    }
+
+    /// A built-in matrix by name, matched case-insensitively against
+    /// [`names`](Self::names). `None` means no built-in goes by that name,
+    /// which is a lookup answer rather than a failure; the caller decides
+    /// whether to report it or to treat the name as a path.
     pub fn by_name(name: &str) -> Option<Self> {
         match name.to_ascii_uppercase().as_str() {
             "BLOSUM62" => Some(Self::blosum62()),
