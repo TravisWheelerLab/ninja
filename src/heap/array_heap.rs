@@ -125,23 +125,37 @@ impl ArrayHeap {
         MIN_RUN_BLOCKS as u64 * block * BYTES_PER_RUN_ENTRY as u64 + fixed
     }
 
-    /// Create an empty heap whose scratch file lives in `dir`.
-    ///
-    /// The scratch file is unnamed and removed when the heap is dropped.
-    pub fn new(dir: &Path, config: ArrayHeapConfig) -> Result<Self> {
-        let mem = config.memory_bytes;
-        let block_size = if mem > 1 << 23 {
+    /// Block size for an allowance, which sets the run size and the slot
+    /// count.
+    fn block_size_for(mem: u64) -> usize {
+        if mem > 1 << 23 {
             4096
         } else if mem > 1 << 22 {
             2048
         } else {
             1024
-        };
+        }
+    }
+
+    /// Entries in one spilled run at this allowance. The memory plan sizes
+    /// the caller's staging buffer from this, since a run's worth of
+    /// entries is staged before it is handed over.
+    pub(crate) fn run_size_for(mem: u64) -> usize {
+        let block_size = Self::block_size_for(mem);
+        let fixed = (4 * block_size + 4 * OUT_BLOCKS * block_size) as u64;
+        (mem.saturating_sub(fixed) / BYTES_PER_RUN_ENTRY as u64)
+            .max(MIN_RUN_BLOCKS as u64 * block_size as u64) as usize
+    }
+
+    /// Create an empty heap whose scratch file lives in `dir`.
+    ///
+    /// The scratch file is unnamed and removed when the heap is dropped.
+    pub fn new(dir: &Path, config: ArrayHeapConfig) -> Result<Self> {
+        let mem = config.memory_bytes;
+        let block_size = Self::block_size_for(mem);
         // read_buf and out_buf are the only buffers that do not scale with
         // the run size; give them theirs first.
-        let fixed = (4 * block_size + 4 * OUT_BLOCKS * block_size) as u64;
-        let c_m = (mem.saturating_sub(fixed) / BYTES_PER_RUN_ENTRY as u64)
-            .max(MIN_RUN_BLOCKS as u64 * block_size as u64) as usize;
+        let c_m = Self::run_size_for(mem);
         let num_slots = (c_m / block_size).saturating_sub(1).max(1);
         let nodes_per_block = block_size / NUM_FIELDS;
         let fields_per_block = nodes_per_block * NUM_FIELDS;

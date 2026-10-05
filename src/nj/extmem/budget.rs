@@ -26,9 +26,26 @@ const TARGET_STRUCT_BYTES: u64 = 1 << 20;
 /// loose to save any work.
 const MIN_CLUSTERS: usize = 4;
 
-/// Bytes per candidate-list entry (`cand_d`, `cand_i`, `cand_j`,
-/// `cand_active`).
-const CAND_ENTRY_BYTES: u64 = 13;
+/// Bytes per candidate-list slot: the list itself (`cand_d`, `cand_i`,
+/// `cand_j`, `cand_active`, 13 bytes), the free-slot list (`free_cands`,
+/// 4), and the buffer the frozen heaps are drained into before they are
+/// appended (12).
+const CAND_ENTRY_BYTES: u64 = 29;
+
+/// Per-taxon scratch the join loop keeps outside the tunable structures:
+/// the active-node list it walks each join (`rows`, 4 bytes a taxon) and
+/// the row it transposes when the window slides (`horiz`, 4 bytes for each
+/// of the `2k` columns).
+const SCRATCH_PER_TAXON: u64 = 12;
+
+/// Bytes per entry staged for a cluster-pair heap: a distance and the pair.
+const STAGE_ENTRY_BYTES: u64 = 12;
+
+/// Share of a cluster-pair heap's allowance given to the heap itself; the
+/// rest covers the staging buffer, which holds one run's worth of entries
+/// at `STAGE_ENTRY_BYTES` against the heap's `BYTES_PER_RUN_ENTRY`.
+const HEAP_SHARE_NUM: u64 = 5;
+const HEAP_SHARE_DEN: u64 = 6;
 
 /// Bytes each live candidate heap needs for its per-taxon vectors,
 /// independent of its buffers: `r_primes` plus the row lists.
@@ -45,8 +62,11 @@ pub struct MemoryPlan {
     /// Scratch for filling the matrix: the rows being computed in parallel
     /// whose columns are bound for disk.
     pub build_scratch: u64,
-    /// Each cluster-pair heap, including its staging buffer.
+    /// Each cluster-pair heap's own buffers.
     pub per_pair_heap: u64,
+    /// Each cluster-pair heap's staging buffer, which holds a run's worth
+    /// of entries before they are sorted and handed to the heap.
+    pub per_pair_stage: u64,
     /// Each candidate heap's buffers, excluding its per-taxon vectors.
     pub per_cand_heap: u64,
     /// Most candidate heaps that may be live at once.
@@ -125,7 +145,7 @@ impl MemoryPlan {
         cand_list_cap: usize,
     ) -> Self {
         let k64 = k as u64;
-        let fixed = FIXED_PER_TAXON * k64 + input_bytes;
+        let fixed = (FIXED_PER_TAXON + SCRATCH_PER_TAXON) * k64 + input_bytes;
         // Never let the per-taxon structures swallow the whole budget: the
         // engine needs working room even for a very large k under a small
         // budget, and going over is better than not running.
@@ -143,11 +163,19 @@ impl MemoryPlan {
         let cand_share = free * 3 / 20;
         let pair_share = free - window_bytes - build_scratch - cand_share;
 
+        // The smallest a cluster pair can cost: a heap at the allowance
+        // below which its buffers stop shrinking, plus the run it stages
+        // before handing it over. Reducing past this point buys nothing,
+        // and stopping above it is what keeps the heaps inside their share.
+        let min_stage = STAGE_ENTRY_BYTES * ArrayHeap::run_size_for(min_struct) as u64;
+        let min_per_pair = min_struct + min_stage;
         let mut cc = cluster_count.max(1);
-        while cc > MIN_CLUSTERS && pair_share / pair_heap_count(cc) < TARGET_STRUCT_BYTES {
+        while cc > MIN_CLUSTERS && pair_share / pair_heap_count(cc) < min_per_pair.max(TARGET_STRUCT_BYTES) {
             cc -= 1;
         }
-        let per_pair_heap = (pair_share / pair_heap_count(cc)).max(min_struct);
+        let per_pair = pair_share / pair_heap_count(cc);
+        let per_pair_heap = (per_pair * HEAP_SHARE_NUM / HEAP_SHARE_DEN).max(min_struct);
+        let per_pair_stage = STAGE_ENTRY_BYTES * ArrayHeap::run_size_for(per_pair_heap) as u64;
 
         // The reserved heap, plus as many more as the candidate share pays
         // for at the same size.
@@ -162,7 +190,7 @@ impl MemoryPlan {
 
         let min_required = fixed
             + 4 * MIN_WINDOW_COLS as u64 * k64
-            + pair_heap_count(cc) * min_struct
+            + pair_heap_count(cc) * (min_struct + min_stage)
             + per_cand_taxon
             + min_struct
             + 1024 * CAND_ENTRY_BYTES;
@@ -172,6 +200,7 @@ impl MemoryPlan {
             window_bytes,
             build_scratch,
             per_pair_heap,
+            per_pair_stage,
             per_cand_heap,
             max_cand_heaps,
             cand_list_cap: cand_list_cap.min((list_share / CAND_ENTRY_BYTES) as usize).max(1024),
@@ -247,10 +276,10 @@ mod tests {
 
     fn accounted_with_input(p: &MemoryPlan, k: usize, input: u64) -> u64 {
         input
-            + FIXED_PER_TAXON * k as u64
+            + (FIXED_PER_TAXON + SCRATCH_PER_TAXON) * k as u64
             + p.window_bytes
             + p.build_scratch
-            + p.per_pair_heap * pair_heap_count(p.cluster_count)
+            + (p.per_pair_heap + p.per_pair_stage) * pair_heap_count(p.cluster_count)
             + (p.per_cand_heap + CAND_HEAP_PER_TAXON * k as u64) * p.max_cand_heaps as u64
             + p.cand_list_cap as u64 * CAND_ENTRY_BYTES
     }

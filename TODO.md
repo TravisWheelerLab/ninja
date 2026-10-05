@@ -48,8 +48,16 @@ Planned work, roughly in order.
   needs root.
 - Consider a verbose line saying how much more memory would buy, so the 1.4x is visible
   rather than hidden. Raised 2026-09-24.
-- The plan still under-accounts by about 6%: at 100,000 taxa it raises the budget to 121 MB
-  and the run peaks at 128 MB. Raised 2026-09-24.
+- [x] 2026-09-25: Cut the plan's under-accounting from 5.8% to 1.7%. At 100,000 taxa it
+  now raises to 124 MB and the run peaks at 126.1 MB (was 121 planned, 128 actual).
+  Added the per-heap staging buffers, the join loop's per-taxon scratch (`rows`,
+  `horiz`), and the true candidate slot cost (13 to 29 bytes, covering `free_cands` and
+  the drain buffer); `ArrayHeap::run_size_for` sizes staging exactly, and the cluster
+  reduction now targets `min_struct + min_stage`.
+- Decide whether the last 1.7% is worth chasing. I think it is allocator slack and the
+  leaf-name strings, which the plan neither allocates nor controls, and recommended
+  closing it; Travis has not ruled. Raised 2026-09-25.
+- [x] 2026-09-25: Released 2.0.0-rc.4, tagged and on crates.io.
 - [x] 2026-09-24: A 100,000-taxon run completes: 51m56s, 128 MB peak, 99,999 joins, a tree
   with 100,000 distinct labels. It had never finished before; see the freeze hang below.
 - [x] 2026-09-24: Fixed the hang in the candidate-heap drain (appending from inside the
@@ -58,8 +66,9 @@ Planned work, roughly in order.
 - Benchmark and probe runs must cap worker threads (`ninja -T N`, or a rayon pool in a test
   binary). The distance step otherwise takes all 192 cores on this shared machine, which
   disrupts other users. Raised 2026-09-24.
-- Get a 20,000-taxon external-memory time on an unloaded machine. Runs this session ranged
-  from 80 s to 445 s depending on other users' load. Raised 2026-09-22.
+- [x] 2026-10-05: Got the 20,000-taxon time on an idle machine (load 0.4): 85.7 s,
+  70.1 MB peak, `--memory 0.1 -T 8`. Earlier figures ranged 80 s to 445 s purely on
+  other users' load, so this is the one to quote.
 - Find a way to run multi-hour jobs that the harness watchdog will not kill. It killed the
   100,000-taxon run twice for "low memory" while the machine had 572 GB available. A
   `setsid nohup` relaunch on 2026-09-23 is the current attempt; tmux and systemd-run are
@@ -82,4 +91,4 @@ Planned work, roughly in order.
 - [x] 2026-09-16, decided against: Quote Newick labels that contain `#` (and any other character outside the plain set): extended-Newick readers such as IcyTree and Dendroscope read `name#tag` as a reticulation node and merge every leaf sharing the tag, so RepeatMasker-style names come out as a network with cycles. Found 2026-09-14. Quoting only helps IcyTree; Dendroscope and SplitsTree strip quotes and still merge labels whose tag starts with H, L or R, so Travis dropped the idea as a hack with little benefit.
 - [x] 2026-09-21: `--collapse_identical` is now the default, with `--no_collapse_identical` to turn it off.
 - [x] 2026-09-22: `--memory` now bounds the external-memory engine (20,000 taxa: 309 MB
-  down to 76 MB). Written and tested, not yet committed.
+  down to 76 MB).
