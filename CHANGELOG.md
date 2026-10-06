@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.1.0 (2026-10-06)
+
+* ninja clamps a negative branch length to zero and reports how many it
+  clamped. Neighbor joining produces one when the distance between the pair
+  being joined is itself negative, which the update formula allows on data
+  that is not additive. The engines already zeroed a negative branch and
+  moved its length onto the sibling, but when the pair distance was negative
+  there was nowhere left to move it, and the sibling stayed negative. A
+  negative edge is not a representable branch, and a downstream step that
+  sums path lengths will read it and get a shorter path than the tree
+  implies. On the 700-taxon test alignment this
+  changes six internal branches, between -0.0005 and -0.011, to zero.
+* Every public item has a documented example: 97 new doctests, covering all
+  91 public items that lacked one. The two engines, the readers and writers,
+  the distance calculators and the substitution matrices each show a small
+  working call with its real output.
+
 ## 2.0.0 (2026-10-05)
 
 Since rc.4; the entries below cover the rest of 2.0.

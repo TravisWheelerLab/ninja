@@ -7,10 +7,11 @@ Planned work, roughly in order.
   below); what remains is to keep it stable across releases, document every
   public item with an example, and decide whether to offer C and Python
   bindings.
-- Write a code example for each public item. All 258 items had a doc
-  comment, enforced by `missing_docs`, but not one had a ```-fenced example;
-  the only runnable ones are the two at the crate level in `src/lib.rs`.
-  Roughly 70 items remain public after the narrowing. Raised 2026-09-23.
+- [x] 2026-10-05: Wrote a code example for every public item. 97 new doctests cover all
+  91 genuinely public items; 192 tests pass in total. The earlier "roughly 70" and "258"
+  counts were both wrong, because they included `pub` items inside private modules
+  (`distance::dna`, `distance::gaps`, `distance::bl45`) and `pub fn` inside `pub(crate)`
+  structs, none of which are reachable from outside the crate.
 - [x] 2026-10-05: Settled `SubstitutionMatrix`'s three failure conventions. They stay
   as they are (`blosum62`/`blosum45` panic through `.expect`, `by_name` returns
   `Option`, `from_file`/`parse` return `Result`), which Travis agreed to; the compiled-in
@@ -29,9 +30,13 @@ Planned work, roughly in order.
   merges of the disk heaps dominate, then pulls, the update loop, spill
   sorts and staging pushes. More slots per level would reduce how many
   merges each entry passes through.
-- Branch lengths can come out negative when both children of a join get a
-  negative length (the reference does the same; 93 of 40,000 at 20,000
-  simulated taxa). Decide whether to clamp both to zero.
+- [x] 2026-10-05: Clamped negative branch lengths to zero in both engines, with the
+  count reported on stderr. The framing in this item was wrong: both children can never
+  be negative, since their lengths sum to twice the pair distance. What happens is that
+  the existing fold moves a negative length onto its sibling, and when the pair distance
+  is itself negative the sibling stays negative. Reference outputs keep their negative
+  values and the test helpers clamp both sides, so they still work as an independent
+  oracle; see `docs/testing.md`.
 - Decide whether the 100 MB minimum budget should scale with the taxon count. At 100,000
   taxa the plan reports 121 MB as the true minimum and the run sits at 132 MB, so a flat
   floor understates what large inputs need. Raised 2026-09-22.
