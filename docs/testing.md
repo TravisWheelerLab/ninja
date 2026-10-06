@@ -53,6 +53,24 @@ change a tree without making it wrong. The helper `assert_trees_close` in
 branch length for that situation, and is what the engine-versus-engine test
 uses.
 
+### Negative branch lengths
+
+Neighbor joining produces a negative branch length when the distance
+between the pair being joined is itself negative, which the update formula
+allows on data that is not additive. ninja clamps such a branch to zero
+before writing it and reports the count on standard error; a negative edge
+is not a representable branch, and a step that sums path lengths over a tree
+containing one gets a shorter path than the tree implies.
+
+The stored reference outputs predate that change and still hold the
+negative values: `dna_700` has six, between -0.0005 and -0.011, all on
+internal branches. Rather than regenerate those files from our own output,
+which would end their usefulness as an independent check, the comparison
+helpers in `tests/common/mod.rs` clamp negatives on both sides before
+comparing. `negative_branch_lengths_are_clamped` in `tests/cli.rs` checks
+the raw output separately, since that normalisation would otherwise hide a
+regression that reintroduced a negative length.
+
 Files named `*.cpp.*` in `tests/reference` come from the C++ `cluster`
 branch (built from `origin/cluster` of the C++ repository): onegap
 distance matrices, which must match exactly, and cluster tables, whose

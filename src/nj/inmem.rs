@@ -86,6 +86,8 @@ struct Builder<'a> {
     last_cand: i32,
 
     stats: NjStats,
+    /// Branches clamped from a negative length to zero.
+    clamped_lengths: u64,
 }
 
 impl<'a> Builder<'a> {
@@ -127,6 +129,7 @@ impl<'a> Builder<'a> {
             free_cands: Vec::new(),
             last_cand: -1,
             stats: NjStats::default(),
+            clamped_lengths: 0,
         };
         b.cluster_and_heap(k);
         b
@@ -523,6 +526,19 @@ impl<'a> Builder<'a> {
                 len_i += len_j;
                 len_j = 0.0;
             }
+            // After the fold, a branch can still be negative: the fold moves a
+            // negative length onto its sibling, and when the pair distance
+            // itself is negative, which the update formula allows on
+            // non-additive data, the sibling has nowhere to put it. A negative
+            // edge is not a representable branch, so clamp it and count it.
+            if len_i < 0.0 {
+                len_i = 0.0;
+                self.clamped_lengths += 1;
+            }
+            if len_j < 0.0 {
+                len_j = 0.0;
+                self.clamped_lengths += 1;
+            }
             self.tree.join(next_internal, best_i as usize, best_j as usize, len_i, len_j);
 
             if verbose >= 3 {
@@ -606,6 +622,10 @@ impl<'a> Builder<'a> {
         if verbose >= 1 {
             eprintln!("{} candidates added", self.stats.candidates_added);
             eprintln!("{} defunct nodes removed", self.stats.defunct_removed);
+            if self.clamped_lengths > 0 {
+                let plural = if self.clamped_lengths == 1 { "" } else { "s" };
+                eprintln!("{} negative branch length{} clamped to zero", self.clamped_lengths, plural);
+            }
         }
         Ok(())
     }

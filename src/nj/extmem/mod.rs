@@ -116,6 +116,8 @@ struct Builder<'a> {
     next_internal: usize,
     new_k: usize,
     stats: NjStats,
+    /// Branches clamped from a negative length to zero.
+    clamped_lengths: u64,
 }
 
 impl<'a> Builder<'a> {
@@ -164,6 +166,7 @@ impl<'a> Builder<'a> {
             next_internal: k,
             new_k: k,
             stats: NjStats::default(),
+            clamped_lengths: 0,
         };
         b.cluster_and_heap(k)?;
         Ok(b)
@@ -674,6 +677,16 @@ impl<'a> Builder<'a> {
                 len_i += len_j;
                 len_j = 0.0;
             }
+            // See the in-memory engine: the fold can leave a branch negative
+            // when the pair distance is itself negative. Clamp and count.
+            if len_i < 0.0 {
+                len_i = 0.0;
+                self.clamped_lengths += 1;
+            }
+            if len_j < 0.0 {
+                len_j = 0.0;
+                self.clamped_lengths += 1;
+            }
             let ni = self.next_internal;
             self.tree.join(ni, mi, mj, len_i as f32, len_j as f32);
             if verbose >= 3 {
@@ -793,6 +806,10 @@ impl<'a> Builder<'a> {
         if verbose >= 1 {
             eprintln!("{} candidates added", self.stats.candidates_added);
             eprintln!("{} defunct nodes removed", self.stats.defunct_removed);
+            if self.clamped_lengths > 0 {
+                let plural = if self.clamped_lengths == 1 { "" } else { "s" };
+                eprintln!("{} negative branch length{} clamped to zero", self.clamped_lengths, plural);
+            }
         }
         Ok(())
     }

@@ -158,8 +158,8 @@ impl TreeDiff {
 }
 
 pub fn compare_trees(a: &str, b: &str) -> TreeDiff {
-    let ta = parse_newick(a);
-    let tb = parse_newick(b);
+    let ta = parse_newick(&clamp_negative_lengths(a));
+    let tb = parse_newick(&clamp_negative_lengths(b));
     assert_eq!(ta.leaves, tb.leaves, "trees have different leaf sets");
     let sa = splits(&ta);
     let sb = splits(&tb);
@@ -200,8 +200,41 @@ pub fn assert_trees_close(a: &str, b: &str, tie_len: f64, len_tol: f64) {
     );
 }
 
+/// Clamp every negative branch length in a Newick string to zero.
+///
+/// ninja clamps a negative branch length to zero before writing it, because
+/// a negative edge is not a representable branch. The stored reference
+/// outputs come from an implementation that writes the negative value, so
+/// the two agree everywhere except on those branches. Clamping the
+/// reference the same way keeps it usable as an independent oracle for
+/// everything else, rather than regenerating it from our own output.
+pub fn clamp_negative_lengths(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b':' && i + 1 < b.len() && b[i + 1] == b'-' {
+            let mut j = i + 2;
+            while j < b.len() && (b[j].is_ascii_digit() || b[j] == b'.') {
+                j += 1;
+            }
+            // Keep the original field width so a text comparison still lines up.
+            let digits = &s[i + 2..j];
+            let width = digits.len();
+            out.push(':');
+            out.push_str(&format!("{:.*}", width.saturating_sub(2), 0.0));
+            i = j;
+        } else {
+            out.push(b[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// Assert two Newick strings are identical apart from surrounding whitespace.
 pub fn assert_same_newick(a: &str, b: &str) {
+    let (a, b) = (clamp_negative_lengths(a), clamp_negative_lengths(b));
     assert_eq!(a.trim(), b.trim(), "Newick strings differ");
 }
 

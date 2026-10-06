@@ -534,3 +534,41 @@ fn matrix_flag_selects_the_substitution_matrix() {
     let b = ninja_stdout(&["-q", "--matrix", "BLOSUM45", "--in", dna.to_str().unwrap()]);
     assert_eq!(a, b);
 }
+
+/// ninja writes no negative branch lengths, and says how many it clamped.
+///
+/// The reference outputs for `dna_700` contain six negative internal
+/// branches, so this input exercises the clamp. `assert_same_newick` and
+/// `compare_trees` normalise negatives on both sides, which would hide a
+/// regression that reintroduced them; this test checks the raw output.
+#[test]
+fn negative_branch_lengths_are_clamped() {
+    let path = fixture("dna_700.fa");
+    let out = run_ninja(&["--matrix", "BLOSUM45", "--in", path.to_str().unwrap()]);
+    assert!(out.status.success());
+    let tree = String::from_utf8(out.stdout).unwrap();
+    assert!(!tree.contains(":-"), "tree contains a negative branch length");
+
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("6 negative branch lengths clamped to zero"),
+        "expected the clamp count on stderr, got:\n{}",
+        err
+    );
+}
+
+/// A matrix that violates the triangle inequality drives a branch negative
+/// even after the fold, because the pair distance itself is negative.
+#[test]
+fn clamps_a_negative_pair_distance() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("neg.phy");
+    std::fs::write(&p, "3\na         0.0 0.1 0.1\nb         0.1 0.0 1.0\nc         0.1 1.0 0.0\n").unwrap();
+    let out = run_ninja(&["--in_type", "d", "--in", p.to_str().unwrap()]);
+    assert!(out.status.success());
+    let tree = String::from_utf8(out.stdout).unwrap();
+    assert!(!tree.contains(":-"), "got {}", tree);
+    assert_eq!(tree.trim(), "(a:0.00000,(b:0.50000,c:0.50000):0.00000);");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("1 negative branch length clamped"), "got:\n{}", err);
+}
