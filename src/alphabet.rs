@@ -4,6 +4,15 @@ use std::fmt;
 use std::str::FromStr;
 
 /// The kind of residues in an alignment.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::Alphabet;
+///
+/// let alphabet = Alphabet::Dna;
+/// assert_eq!(alphabet.symbols().len(), 4);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Alphabet {
     /// Nucleotides. Only `A`, `C`, `G`, `T` count toward distances; `U` is
@@ -18,6 +27,15 @@ impl Alphabet {
     /// Symbols that make up the core alphabet, in the index order used by the
     /// distance tables (`AGCT` for DNA so that transitions are index pairs
     /// {0,1} and {2,3}).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Alphabet;
+    ///
+    /// assert_eq!(Alphabet::Dna.symbols(), b"AGCT");
+    /// assert_eq!(Alphabet::Amino.symbols().len(), 20);
+    /// ```
     pub fn symbols(self) -> &'static [u8] {
         match self {
             Alphabet::Dna => b"AGCT",
@@ -26,6 +44,16 @@ impl Alphabet {
     }
 
     /// Lookup table from ASCII byte to core-alphabet index, or `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Alphabet;
+    ///
+    /// let table = Alphabet::Dna.index_table();
+    /// assert_eq!(table[b'G' as usize], Some(1));
+    /// assert_eq!(table[b'N' as usize], None);
+    /// ```
     pub fn index_table(self) -> [Option<u8>; 256] {
         let mut t = [None; 256];
         for (i, &c) in self.symbols().iter().enumerate() {
@@ -57,6 +85,15 @@ impl fmt::Display for Alphabet {
 
 /// Correction applied to a raw pairwise dissimilarity to estimate
 /// evolutionary distance.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::{Alphabet, Correction};
+///
+/// assert!(Correction::JukesCantor.applies_to(Alphabet::Dna));
+/// assert!(!Correction::JukesCantor.applies_to(Alphabet::Amino));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Correction {
     /// Raw proportion of differing sites (DNA) or mean substitution-matrix
@@ -82,6 +119,15 @@ pub enum Correction {
 impl Correction {
     /// The correction NINJA uses when none is requested: Kimura for DNA,
     /// scoredist for protein.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::{Alphabet, Correction};
+    ///
+    /// assert_eq!(Correction::default_for(Alphabet::Dna), Correction::Kimura2);
+    /// assert_eq!(Correction::default_for(Alphabet::Amino), Correction::ScoreDist);
+    /// ```
     pub fn default_for(alphabet: Alphabet) -> Self {
         match alphabet {
             Alphabet::Dna => Correction::Kimura2,
@@ -90,6 +136,15 @@ impl Correction {
     }
 
     /// Whether this correction can be applied to the given alphabet.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::{Alphabet, Correction};
+    ///
+    /// assert!(Correction::ScoreDist.applies_to(Alphabet::Amino));
+    /// assert!(!Correction::ScoreDist.applies_to(Alphabet::Dna));
+    /// ```
     pub fn applies_to(self, alphabet: Alphabet) -> bool {
         matches!(
             (self, alphabet),
@@ -101,6 +156,15 @@ impl Correction {
 
     /// Largest distance that can be reported: 1 without correction,
     /// otherwise 3.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Correction;
+    ///
+    /// assert_eq!(Correction::None.max_distance(), 1.0);
+    /// assert_eq!(Correction::Kimura2.max_distance(), 3.0);
+    /// ```
     pub fn max_distance(self) -> f32 {
         match self {
             Correction::None => 1.0,

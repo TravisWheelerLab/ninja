@@ -8,6 +8,16 @@ use crate::alphabet::Alphabet;
 use crate::error::{Error, Result};
 
 /// A multiple sequence alignment: one row per sequence, all the same length.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::io::fasta::parse_fasta;
+///
+/// let aln = parse_fasta(b">a\nACGT\n>b\nACGA\n", None).unwrap();
+/// assert_eq!(aln.names, vec!["a", "b"]);
+/// assert_eq!(aln.seqs, vec![b"ACGT".to_vec(), b"ACGA".to_vec()]);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alignment {
     /// Sequence identifiers: the text after `>` up to the first whitespace.
@@ -20,16 +30,51 @@ pub struct Alignment {
 
 impl Alignment {
     /// Number of sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGT\n>b\nACGA\n", None).unwrap();
+    /// assert_eq!(aln.len(), 2);
+    /// ```
     pub fn len(&self) -> usize {
         self.names.len()
     }
 
     /// True when the alignment holds no sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::alphabet::Alphabet;
+    /// use ninja::io::fasta::{parse_fasta, Alignment};
+    ///
+    /// let empty = Alignment { names: Vec::new(), seqs: Vec::new(), alphabet: Alphabet::Dna };
+    /// assert!(empty.is_empty());
+    ///
+    /// let aln = parse_fasta(b">a\nACGT\n", None).unwrap();
+    /// assert!(!aln.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.names.is_empty()
     }
 
     /// Number of columns (after all-gap columns were removed).
+    ///
+    /// # Examples
+    ///
+    /// Columns 0 and 1 are gaps in every sequence, so they are dropped and
+    /// `width` reports 2, not the 4 columns in the input.
+    ///
+    /// ```
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\n--AC\n>b\n--GT\n", None).unwrap();
+    /// assert_eq!(aln.width(), 2);
+    /// assert_eq!(aln.seqs[0], b"AC");
+    /// ```
     pub fn width(&self) -> usize {
         self.seqs.first().map_or(0, |s| s.len())
     }
@@ -38,6 +83,19 @@ impl Alignment {
 /// Read a FASTA alignment from a file.
 ///
 /// See [`read_fasta_from`] for the parsing rules.
+///
+/// # Examples
+///
+/// ```
+/// use std::io::Write;
+///
+/// use ninja::io::fasta::read_fasta;
+///
+/// let mut file = tempfile::NamedTempFile::new().unwrap();
+/// write!(file, ">a\nACGT\n>b\nACGA\n").unwrap();
+/// let aln = read_fasta(file.path(), None).unwrap();
+/// assert_eq!(aln.names, vec!["a", "b"]);
+/// ```
 pub fn read_fasta(path: impl AsRef<Path>, alphabet: Option<Alphabet>) -> Result<Alignment> {
     let path = path.as_ref();
     let f = File::open(path).map_err(|e| Error::io(path, e))?;
@@ -47,6 +105,17 @@ pub fn read_fasta(path: impl AsRef<Path>, alphabet: Option<Alphabet>) -> Result<
 }
 
 /// Read a FASTA alignment from any reader (for example standard input).
+///
+/// # Examples
+///
+/// ```
+/// use std::io::Cursor;
+///
+/// use ninja::io::fasta::read_fasta_from;
+///
+/// let aln = read_fasta_from(Cursor::new(b">a\nACGT\n>b\nACGA\n"), None).unwrap();
+/// assert_eq!(aln.names, vec!["a", "b"]);
+/// ```
 pub fn read_fasta_from(mut reader: impl Read, alphabet: Option<Alphabet>) -> Result<Alignment> {
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes)?;
@@ -70,6 +139,23 @@ pub fn read_fasta_from(mut reader: impl Read, alphabet: Option<Alphabet>) -> Res
 /// * For DNA, `U` is converted to `T`.
 ///
 /// All sequences must have the same length, and there must be at least one.
+///
+/// # Examples
+///
+/// The header's description is dropped, `.` and `-` both mean a gap,
+/// lower-case residues are upper-cased, the detected DNA alphabet turns the
+/// trailing `U` into `T`, and the column that ends up a gap in both
+/// sequences is removed.
+///
+/// ```
+/// use ninja::alphabet::Alphabet;
+/// use ninja::io::fasta::parse_fasta;
+///
+/// let aln = parse_fasta(b">a desc\nAC-G\nT\n>b\nac.gu\n", None).unwrap();
+/// assert_eq!(aln.names, vec!["a", "b"]);
+/// assert_eq!(aln.alphabet, Alphabet::Dna);
+/// assert_eq!(aln.seqs, vec![b"ACGT".to_vec(), b"ACGT".to_vec()]);
+/// ```
 pub fn parse_fasta(bytes: &[u8], alphabet: Option<Alphabet>) -> Result<Alignment> {
     let mut names: Vec<String> = Vec::new();
     let mut seqs: Vec<Vec<u8>> = Vec::new();
@@ -160,6 +246,18 @@ pub fn parse_fasta(bytes: &[u8], alphabet: Option<Alphabet>) -> Result<Alignment
 impl Alignment {
     /// Group sequences with identical residues (after all-gap columns were
     /// removed), each group in input order and listed by its first member.
+    ///
+    /// # Examples
+    ///
+    /// `a`, `c`, and `d` share a sequence, so they form one group; `b` forms
+    /// its own group.
+    ///
+    /// ```
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGT\n>b\nACGA\n>c\nACGT\n>d\nACGT\n", None).unwrap();
+    /// assert_eq!(aln.duplicate_groups(), vec![vec![0, 2, 3], vec![1]]);
+    /// ```
     pub fn duplicate_groups(&self) -> Vec<Vec<usize>> {
         use std::collections::HashMap;
         let mut first: HashMap<&[u8], usize> = HashMap::new();
@@ -177,6 +275,17 @@ impl Alignment {
     }
 
     /// The alignment restricted to the first member of each group.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGT\n>b\nACGA\n>c\nACGT\n>d\nACGT\n", None).unwrap();
+    /// let reps = aln.representatives(&aln.duplicate_groups());
+    /// assert_eq!(reps.names, vec!["a", "b"]);
+    /// assert_eq!(reps.seqs, vec![b"ACGT".to_vec(), b"ACGA".to_vec()]);
+    /// ```
     pub fn representatives(&self, groups: &[Vec<usize>]) -> Alignment {
         Alignment {
             names: groups.iter().map(|g| self.names[g[0]].clone()).collect(),
@@ -187,6 +296,16 @@ impl Alignment {
 }
 
 /// DNA when every non-gap residue is in `ACGTU`, otherwise protein.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::alphabet::Alphabet;
+/// use ninja::io::fasta::detect_alphabet;
+///
+/// assert_eq!(detect_alphabet(&[b"ACGT".to_vec(), b"AC-U".to_vec()]), Alphabet::Dna);
+/// assert_eq!(detect_alphabet(&[b"ACDE".to_vec()]), Alphabet::Amino);
+/// ```
 pub fn detect_alphabet(seqs: &[Vec<u8>]) -> Alphabet {
     let dna = seqs.iter().all(|s| s.iter().all(|&c| matches!(c, b'-' | b'A' | b'C' | b'G' | b'T' | b'U')));
     if dna {

@@ -33,6 +33,18 @@ use crate::error::{Error, Result};
 use crate::io::fasta::Alignment;
 
 /// Computes corrected distances between any two sequences of an alignment.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::distance::DistanceCalculator;
+/// use ninja::io::fasta::parse_fasta;
+///
+/// let aln = parse_fasta(b">a\nACGTACGTAC\n>b\nACGTACGTAG\n>c\nAGCTACGTAC\n", None).unwrap();
+/// let calc = DistanceCalculator::new(&aln, None).unwrap();
+/// let d = calc.calc(0, 1);
+/// assert!((d - 0.108_466_1).abs() < 1e-6);
+/// ```
 #[derive(Debug, Clone)]
 pub struct DistanceCalculator {
     alphabet: Alphabet,
@@ -53,12 +65,35 @@ impl DistanceCalculator {
     /// `correction` defaults to Kimura two-parameter for DNA and scoredist
     /// for protein. A correction that does not apply to the alphabet is an
     /// error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::alphabet::Correction;
+    /// use ninja::distance::DistanceCalculator;
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGTACGTAC\n>b\nACGTACGTAG\n>c\nAGCTACGTAC\n", None).unwrap();
+    /// let calc = DistanceCalculator::new(&aln, Some(Correction::JukesCantor)).unwrap();
+    /// assert!((calc.calc(0, 1) - 0.107_325_6).abs() < 1e-6);
+    /// ```
     pub fn new(aln: &Alignment, correction: Option<Correction>) -> Result<Self> {
         Self::with_matrix(aln, correction, &SubstitutionMatrix::blosum62())
     }
 
     /// Like [`new`](Self::new) with a chosen substitution matrix for
     /// protein distances (ignored for DNA).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::{DistanceCalculator, SubstitutionMatrix};
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nMKVLATIR\n>b\nMKVLSTVR\n>c\nMRVLATIK\n", None).unwrap();
+    /// let calc = DistanceCalculator::with_matrix(&aln, None, &SubstitutionMatrix::blosum45()).unwrap();
+    /// assert!((calc.calc(0, 1) - 0.183_226_1).abs() < 1e-6);
+    /// ```
     pub fn with_matrix(
         aln: &Alignment,
         correction: Option<Correction>,
@@ -82,21 +117,68 @@ impl DistanceCalculator {
     }
 
     /// Number of sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceCalculator;
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGT\n>b\nACGA\n>c\nAGGT\n", None).unwrap();
+    /// let calc = DistanceCalculator::new(&aln, None).unwrap();
+    /// assert_eq!(calc.len(), 3);
+    /// ```
     pub fn len(&self) -> usize {
         self.n
     }
 
     /// True when there are no sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::alphabet::Alphabet;
+    /// use ninja::distance::DistanceCalculator;
+    /// use ninja::io::fasta::Alignment;
+    ///
+    /// let aln = Alignment { names: vec![], seqs: vec![], alphabet: Alphabet::Dna };
+    /// let calc = DistanceCalculator::new(&aln, None).unwrap();
+    /// assert!(calc.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.n == 0
     }
 
     /// The alphabet the calculator was built for.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::alphabet::Alphabet;
+    /// use ninja::distance::DistanceCalculator;
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGT\n>b\nACGA\n", None).unwrap();
+    /// let calc = DistanceCalculator::new(&aln, None).unwrap();
+    /// assert_eq!(calc.alphabet(), Alphabet::Dna);
+    /// ```
     pub fn alphabet(&self) -> Alphabet {
         self.alphabet
     }
 
     /// The correction in use.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::alphabet::Correction;
+    /// use ninja::distance::DistanceCalculator;
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGT\n>b\nACGA\n", None).unwrap();
+    /// let calc = DistanceCalculator::new(&aln, Some(Correction::None)).unwrap();
+    /// assert_eq!(calc.correction(), Correction::None);
+    /// ```
     pub fn correction(&self) -> Correction {
         self.correction
     }
@@ -106,6 +188,17 @@ impl DistanceCalculator {
     /// Pairs with no comparable sites get the correction's maximum distance
     /// (1 with no correction, 3 otherwise), as do pairs whose correction
     /// formula is undefined (saturated divergence).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceCalculator;
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGTACGTAC\n>b\nACGTACGTAG\n>c\nAGCTACGTAC\n", None).unwrap();
+    /// let calc = DistanceCalculator::new(&aln, None).unwrap();
+    /// assert!((calc.calc(0, 2) - 0.239_278_2).abs() < 1e-6);
+    /// ```
     #[inline]
     pub fn calc(&self, a: usize, b: usize) -> f64 {
         let maxscore = self.correction.max_distance();

@@ -9,6 +9,19 @@ use std::collections::HashSet;
 use crate::error::{Error, Result};
 
 /// What to do when two input records share a name.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::io::names::{resolve_duplicates, DuplicateNames};
+///
+/// let mut names = vec!["a".to_string(), "a".to_string()];
+/// assert!(resolve_duplicates(&mut names, DuplicateNames::Error).is_err());
+///
+/// let mut names = vec!["a".to_string(), "a".to_string()];
+/// resolve_duplicates(&mut names, DuplicateNames::Rename).unwrap();
+/// assert_eq!(names, vec!["a", "a_2"]);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DuplicateNames {
     /// Append `_2`, `_3`, ... to the second and later occurrences and
@@ -20,6 +33,19 @@ pub enum DuplicateNames {
 }
 
 /// One record renamed by [`resolve_duplicates`].
+///
+/// # Examples
+///
+/// ```
+/// use ninja::io::names::{resolve_duplicates, DuplicateNames};
+///
+/// let mut names = vec!["a".to_string(), "b".to_string(), "a".to_string()];
+/// let renamed = resolve_duplicates(&mut names, DuplicateNames::Rename).unwrap();
+/// assert_eq!(renamed.len(), 1);
+/// assert_eq!(renamed[0].index, 2);
+/// assert_eq!(renamed[0].from, "a");
+/// assert_eq!(renamed[0].to, "a_2");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Renamed {
     /// Position of the record in input order, starting at 0.
@@ -38,6 +64,19 @@ pub struct Renamed {
 /// list describes every change, in input order. Under
 /// [`DuplicateNames::Error`] any repeated name is an error and `names` is
 /// left unchanged.
+///
+/// # Examples
+///
+/// The second `a` cannot become `a_2`, because that name is already present
+/// in the input, so it skips ahead to `a_3`.
+///
+/// ```
+/// use ninja::io::names::{resolve_duplicates, DuplicateNames};
+///
+/// let mut names: Vec<String> = ["a", "a", "a_2"].iter().map(|s| s.to_string()).collect();
+/// resolve_duplicates(&mut names, DuplicateNames::Rename).unwrap();
+/// assert_eq!(names, vec!["a", "a_3", "a_2"]);
+/// ```
 pub fn resolve_duplicates(names: &mut [String], policy: DuplicateNames) -> Result<Vec<Renamed>> {
     let original: HashSet<&str> = names.iter().map(String::as_str).collect();
     if original.len() == names.len() {

@@ -4,6 +4,20 @@ use std::fmt;
 use std::path::PathBuf;
 
 /// Errors produced while reading input, computing distances, or building a tree.
+///
+/// # Examples
+///
+/// Malformed input produces an [`Error::Format`]:
+///
+/// ```
+/// use ninja::io::fasta::parse_fasta;
+///
+/// let err = parse_fasta(b"not fasta", None).unwrap_err();
+/// assert_eq!(
+///     err.to_string(),
+///     "input format error: expected FASTA input starting with '>' (only FASTA alignments are accepted)"
+/// );
+/// ```
 #[derive(Debug)]
 pub enum Error {
     /// An I/O failure, with the path involved when one is known.
@@ -22,6 +36,20 @@ pub enum Error {
 }
 
 /// Convenience alias used throughout the crate.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::Result;
+/// use ninja::io::fasta::parse_fasta;
+///
+/// fn sequence_count(bytes: &[u8]) -> Result<usize> {
+///     let aln = parse_fasta(bytes, None)?;
+///     Ok(aln.len())
+/// }
+///
+/// assert_eq!(sequence_count(b">a\nACGT\n>b\nACGA\n").unwrap(), 2);
+/// ```
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {

@@ -29,6 +29,16 @@ use std::fmt;
 use std::str::FromStr;
 
 /// Which neighbor-joining engine to run.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::Method;
+/// use std::str::FromStr;
+///
+/// assert_eq!(Method::from_str("auto").unwrap(), Method::Auto);
+/// assert_eq!(Method::InMem.to_string(), "inmem");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
     /// Use the in-memory engine when the matrix fits the memory budget,
@@ -65,6 +75,16 @@ impl fmt::Display for Method {
 
 /// Tunables of the NINJA search. The defaults are those of the reference
 /// implementation and the paper.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::NjParams;
+///
+/// let params = NjParams { cluster_count: 10, ..NjParams::default() };
+/// assert_eq!(params.cluster_count, 10);
+/// assert_eq!(params.candidate_iters, 50);
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct NjParams {
     /// Number of row-sum clusters (heaps are kept per cluster pair).
@@ -104,6 +124,17 @@ impl Default for NjParams {
 
 impl NjParams {
     /// The rebuild ratio in effect.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::NjParams;
+    ///
+    /// assert_eq!(NjParams::default().effective_rebuild_ratio(), 0.25);
+    ///
+    /// let params = NjParams { rebuild_step_ratio: Some(0.4), ..NjParams::default() };
+    /// assert_eq!(params.effective_rebuild_ratio(), 0.4);
+    /// ```
     pub fn effective_rebuild_ratio(&self) -> f32 {
         match self.rebuild_step_ratio {
             Some(r) => r,
@@ -141,6 +172,16 @@ impl NjParams {
 }
 
 /// Counters reported after a run.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::NjStats;
+///
+/// let stats = NjStats::default();
+/// assert_eq!(stats.rebuilds, 0);
+/// assert_eq!(stats.candidates_added, 0);
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NjStats {
     /// Pairs moved from heaps to the candidate list.

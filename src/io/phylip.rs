@@ -14,9 +14,29 @@ use crate::error::{Error, Result};
 /// a distance `d` is stored as `round(d * 1e8)`, then rounded to a multiple
 /// of 100 so that a matrix read from a file and one computed from an
 /// alignment agree to the six decimals the writer prints.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::io::phylip::SCALE;
+///
+/// let distance = 0.705596_f64;
+/// assert_eq!((distance * SCALE as f64).round() as i64, 70_559_600);
+/// ```
 pub const SCALE: i64 = 100_000_000;
 
 /// The lower triangle of a distance matrix, as parsed from a Phylip file.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::io::phylip::read_phylip_from;
+///
+/// let text = "3\na 0.0 0.5 0.25\nb 0.5 0.0 0.75\nc 0.25 0.75 0.0\n";
+/// let m = read_phylip_from(text.as_bytes()).unwrap();
+/// assert_eq!(m.names, vec!["a", "b", "c"]);
+/// assert_eq!(m.get(0, 2), 25_000_000);
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhylipMatrix {
     /// Taxon names in file order.
@@ -28,16 +48,47 @@ pub struct PhylipMatrix {
 
 impl PhylipMatrix {
     /// Number of taxa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::io::phylip::read_phylip_from;
+    ///
+    /// let m = read_phylip_from("2\na\nb 0.5\n".as_bytes()).unwrap();
+    /// assert_eq!(m.len(), 2);
+    /// ```
     pub fn len(&self) -> usize {
         self.names.len()
     }
 
     /// True when the matrix is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::io::phylip::PhylipMatrix;
+    ///
+    /// let empty = PhylipMatrix { names: Vec::new(), lower: Vec::new() };
+    /// assert!(empty.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.names.is_empty()
     }
 
     /// Distance between `i` and `j` in `1e-8` units (`i != j`).
+    ///
+    /// # Examples
+    ///
+    /// `get` is symmetric: either argument order returns the same stored
+    /// value.
+    ///
+    /// ```
+    /// use ninja::io::phylip::read_phylip_from;
+    ///
+    /// let m = read_phylip_from("3\na\nb 0.5\nc 0.25 0.75\n".as_bytes()).unwrap();
+    /// assert_eq!(m.get(0, 2), 25_000_000);
+    /// assert_eq!(m.get(2, 0), 25_000_000);
+    /// ```
     pub fn get(&self, i: usize, j: usize) -> i64 {
         if i > j {
             self.lower[i][j]
@@ -48,6 +99,19 @@ impl PhylipMatrix {
 }
 
 /// Read a Phylip distance matrix from a file.
+///
+/// # Examples
+///
+/// ```
+/// use std::io::Write;
+///
+/// use ninja::io::phylip::read_phylip;
+///
+/// let mut file = tempfile::NamedTempFile::new().unwrap();
+/// write!(file, "2\na\nb 0.5\n").unwrap();
+/// let m = read_phylip(file.path()).unwrap();
+/// assert_eq!(m.names, vec!["a", "b"]);
+/// ```
 pub fn read_phylip(path: impl AsRef<Path>) -> Result<PhylipMatrix> {
     let path = path.as_ref();
     let f = File::open(path).map_err(|e| Error::io(path, e))?;
@@ -58,6 +122,15 @@ pub fn read_phylip(path: impl AsRef<Path>) -> Result<PhylipMatrix> {
 }
 
 /// Read a Phylip distance matrix from any reader.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::io::phylip::read_phylip_from;
+///
+/// let m = read_phylip_from("2\na\nb 0.5\n".as_bytes()).unwrap();
+/// assert_eq!(m.get(0, 1), 50_000_000);
+/// ```
 pub fn read_phylip_from(reader: impl Read) -> Result<PhylipMatrix> {
     let mut r = BufReader::new(reader);
     let mut line = String::new();
@@ -180,6 +253,18 @@ fn parse_scaled(tok: &str) -> Option<i64> {
 /// it should be a cheap lookup. Rows are formatted in parallel, a block at a
 /// time, and written in order. Values are printed with six decimals,
 /// formatted exactly as the reference implementation did.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::io::phylip::write_phylip;
+///
+/// let names = vec!["a".to_string(), "b".to_string()];
+/// let d = [[0.0, 0.5], [0.5, 0.0]];
+/// let mut out = Vec::new();
+/// write_phylip(&mut out, &names, |i, j| d[i][j]).unwrap();
+/// assert_eq!(String::from_utf8(out).unwrap(), "2\na 0.000000 0.500000\nb 0.500000 0.000000\n");
+/// ```
 pub fn write_phylip<W: Write>(
     mut w: W,
     names: &[String],
@@ -220,6 +305,16 @@ pub fn write_phylip<W: Write>(
 /// Format `val` with six decimals the way the reference did: truncate the
 /// integer part after adding half a unit in the last place, then print the
 /// fraction rounded to six digits.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::io::phylip::push_fixed6;
+///
+/// let mut buf = String::new();
+/// push_fixed6(&mut buf, 0.705596);
+/// assert_eq!(buf, "0.705596");
+/// ```
 pub fn push_fixed6(buf: &mut String, val: f64) {
     use std::fmt::Write as _;
     let int_part = (val + 0.0000005) as i64;

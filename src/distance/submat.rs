@@ -13,6 +13,15 @@ use std::path::Path;
 use crate::error::{Error, Result};
 
 /// Residues in table order.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::distance::submat::RESIDUES;
+///
+/// let w = RESIDUES.iter().position(|&r| r == b'W').unwrap();
+/// assert_eq!(w, 17);
+/// ```
 pub const RESIDUES: &[u8; 20] = b"ARNDCQEGHILKMFPSTWYV";
 
 /// Background composition per mille, in [`RESIDUES`] order: the average
@@ -22,6 +31,16 @@ const BACKGROUND_PERMILLE: [u32; 20] =
     [74, 42, 44, 59, 33, 58, 37, 74, 29, 38, 76, 72, 18, 40, 50, 81, 62, 13, 33, 68];
 
 /// A 20x20 integer scoring matrix and its score unit.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::distance::submat::SubstitutionMatrix;
+///
+/// let m = SubstitutionMatrix::blosum62();
+/// assert_eq!(m.name(), "BLOSUM62");
+/// assert_eq!(m.bits(), 0.5);
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubstitutionMatrix {
     name: String,
@@ -33,6 +52,16 @@ pub struct SubstitutionMatrix {
 
 impl SubstitutionMatrix {
     /// BLOSUM62 in half-bit units, the default for protein distances.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::submat::{RESIDUES, SubstitutionMatrix};
+    ///
+    /// let m = SubstitutionMatrix::blosum62();
+    /// let w = RESIDUES.iter().position(|&r| r == b'W').unwrap();
+    /// assert_eq!(m.score(w, w), 11);
+    /// ```
     pub fn blosum62() -> Self {
         Self::parse(include_str!("matrices/BLOSUM62.txt"), "BLOSUM62").expect("built-in BLOSUM62 parses")
     }
@@ -40,6 +69,16 @@ impl SubstitutionMatrix {
     /// BLOSUM45 in third-bit units. Its dissimilarities are FastTree's
     /// published table rather than a fresh derivation, so output matches
     /// earlier releases bit for bit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::submat::SubstitutionMatrix;
+    ///
+    /// let m = SubstitutionMatrix::blosum45();
+    /// assert_eq!(m.bits(), 1.0 / 3.0);
+    /// assert_eq!(m.score(0, 0), 5); // A-A
+    /// ```
     pub fn blosum45() -> Self {
         let mut m =
             Self::parse(include_str!("matrices/BLOSUM45.txt"), "BLOSUM45").expect("built-in BLOSUM45 parses");
@@ -49,6 +88,14 @@ impl SubstitutionMatrix {
 
     /// Names [`by_name`](Self::by_name) accepts, for help text and error
     /// messages, so those cannot drift from what it matches.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::submat::SubstitutionMatrix;
+    ///
+    /// assert_eq!(SubstitutionMatrix::names(), &["BLOSUM62", "BLOSUM45"]);
+    /// ```
     pub fn names() -> &'static [&'static str] {
         &["BLOSUM62", "BLOSUM45"]
     }
@@ -57,6 +104,18 @@ impl SubstitutionMatrix {
     /// [`names`](Self::names). `None` means no built-in goes by that name,
     /// which is a lookup answer rather than a failure; the caller decides
     /// whether to report it or to treat the name as a path.
+    ///
+    /// # Examples
+    ///
+    /// An unknown name is `None`, not an error; [`parse`](Self::parse) and
+    /// [`from_file`](Self::from_file) are the ones that return a [`Result`].
+    ///
+    /// ```
+    /// use ninja::distance::submat::SubstitutionMatrix;
+    ///
+    /// assert!(SubstitutionMatrix::by_name("blosum62").is_some());
+    /// assert!(SubstitutionMatrix::by_name("PAM250").is_none());
+    /// ```
     pub fn by_name(name: &str) -> Option<Self> {
         match name.to_ascii_uppercase().as_str() {
             "BLOSUM62" => Some(Self::blosum62()),
@@ -66,6 +125,19 @@ impl SubstitutionMatrix {
     }
 
     /// Read a matrix file in the NCBI format used by BLAST and EMBOSS.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Write;
+    /// use ninja::distance::submat::SubstitutionMatrix;
+    ///
+    /// let mut file = tempfile::NamedTempFile::new().unwrap();
+    /// write!(file, "{}", include_str!("matrices/BLOSUM62.txt")).unwrap();
+    /// let m = SubstitutionMatrix::from_file(file.path()).unwrap();
+    /// assert_eq!(m.name(), file.path().file_name().unwrap().to_str().unwrap());
+    /// assert_eq!(m.bits(), 0.5);
+    /// ```
     pub fn from_file(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path).map_err(|e| Error::io(path, e))?;
         let name =
@@ -79,6 +151,18 @@ impl SubstitutionMatrix {
     /// score unit is taken from a comment such as `scale of ln(2)/2` or
     /// `in 1/2 Bit Units`; without one it is estimated from the scores and
     /// [`scale_declared`](Self::scale_declared) reports `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::submat::SubstitutionMatrix;
+    ///
+    /// let m = SubstitutionMatrix::parse(include_str!("matrices/BLOSUM45.txt"), "BLOSUM45").unwrap();
+    /// assert_eq!(m.bits(), 1.0 / 3.0);
+    ///
+    /// let err = SubstitutionMatrix::parse("A\nA 4\n", "tiny").unwrap_err();
+    /// assert!(err.to_string().contains("no scores for residue"));
+    /// ```
     pub fn parse(text: &str, name: &str) -> Result<Self> {
         let mut bits: Option<f64> = None;
         let mut columns: Option<Vec<Option<usize>>> = None;
@@ -159,27 +243,81 @@ impl SubstitutionMatrix {
     }
 
     /// The name given when the matrix was created (a built-in name or a file name).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::submat::SubstitutionMatrix;
+    ///
+    /// assert_eq!(SubstitutionMatrix::blosum45().name(), "BLOSUM45");
+    /// ```
     pub fn name(&self) -> &str {
         &self.name
     }
 
     /// Bits per score unit (1/2 for BLOSUM62, 1/3 for BLOSUM45).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::submat::SubstitutionMatrix;
+    ///
+    /// assert_eq!(SubstitutionMatrix::blosum62().bits(), 0.5);
+    /// assert_eq!(SubstitutionMatrix::blosum45().bits(), 1.0 / 3.0);
+    /// ```
     pub fn bits(&self) -> f64 {
         self.bits
     }
 
     /// Whether the score unit came from the file rather than an estimate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::submat::SubstitutionMatrix;
+    ///
+    /// assert!(SubstitutionMatrix::blosum62().scale_declared());
+    ///
+    /// let text: String = include_str!("matrices/BLOSUM45.txt")
+    ///     .lines()
+    ///     .filter(|l| !l.starts_with('#'))
+    ///     .collect::<Vec<_>>()
+    ///     .join("\n");
+    /// let m = SubstitutionMatrix::parse(&text, "no scale comment").unwrap();
+    /// assert!(!m.scale_declared());
+    /// ```
     pub fn scale_declared(&self) -> bool {
         self.scale_declared
     }
 
     /// Score for residues `a` and `b`, indices into [`RESIDUES`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::submat::{RESIDUES, SubstitutionMatrix};
+    ///
+    /// let m = SubstitutionMatrix::blosum62();
+    /// let a = RESIDUES.iter().position(|&r| r == b'A').unwrap();
+    /// let r = RESIDUES.iter().position(|&r| r == b'R').unwrap();
+    /// assert_eq!(m.score(a, r), -1);
+    /// ```
     pub fn score(&self, a: usize, b: usize) -> i32 {
         self.scores[a][b]
     }
 
     /// The dissimilarity table used for distances: FastTree's published
     /// table for the built-in BLOSUM45, the derivation otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::submat::SubstitutionMatrix;
+    ///
+    /// let d = SubstitutionMatrix::blosum62().dissimilarities();
+    /// assert_eq!(d[0][0], 0.0);
+    /// assert!(d[0][1] > 0.5 && d[0][1] < 3.0);
+    /// ```
     pub fn dissimilarities(&self) -> [[f32; 20]; 20] {
         if self.builtin_blosum45 {
             super::bl45::BL45
@@ -189,6 +327,24 @@ impl SubstitutionMatrix {
     }
 
     /// The derivation described in the module documentation, for any matrix.
+    ///
+    /// # Examples
+    ///
+    /// For the built-in BLOSUM45 this differs from [`dissimilarities`](Self::dissimilarities),
+    /// which returns FastTree's published table instead, by less than 2e-6.
+    ///
+    /// ```
+    /// use ninja::distance::submat::SubstitutionMatrix;
+    ///
+    /// let m = SubstitutionMatrix::blosum45();
+    /// let derived = m.derived_dissimilarities();
+    /// let published = m.dissimilarities();
+    /// let worst = (0..20)
+    ///     .flat_map(|a| (0..20).map(move |b| (a, b)))
+    ///     .map(|(a, b)| (derived[a][b] - published[a][b]).abs())
+    ///     .fold(0f32, f32::max);
+    /// assert!(worst < 2e-6);
+    /// ```
     pub fn derived_dissimilarities(&self) -> [[f32; 20]; 20] {
         let freq: Vec<f64> = BACKGROUND_PERMILLE.iter().map(|&p| p as f64 / 1001.0).collect();
         let mut m = [[0f64; 20]; 20];

@@ -6,6 +6,16 @@ use std::io::Write;
 const NO_LENGTH: f32 = f32::MAX;
 
 /// A node in a [`Tree`]. Leaves carry a name; internal nodes carry children.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::tree::Node;
+///
+/// let leaf = Node { left: None, right: None, name: "a".to_string(), length: 0.1 };
+/// assert!(leaf.is_leaf());
+/// assert_eq!(leaf.branch_length(), Some(0.1));
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Node {
     /// Left child index, or `None` for a leaf.
@@ -21,11 +31,33 @@ pub struct Node {
 
 impl Node {
     /// True when this node has no children.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::tree::Node;
+    ///
+    /// let leaf = Node { left: None, right: None, name: "a".to_string(), length: 0.1 };
+    /// let internal = Node { left: Some(0), right: Some(1), name: String::new(), length: 0.1 };
+    /// assert!(leaf.is_leaf());
+    /// assert!(!internal.is_leaf());
+    /// ```
     pub fn is_leaf(&self) -> bool {
         self.left.is_none()
     }
 
     /// Branch length, or `None` at the root.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::tree::Node;
+    ///
+    /// let root = Node { left: Some(0), right: Some(1), name: String::new(), length: f32::MAX };
+    /// let child = Node { left: None, right: None, name: "a".to_string(), length: 0.25 };
+    /// assert_eq!(root.branch_length(), None);
+    /// assert_eq!(child.branch_length(), Some(0.25));
+    /// ```
     pub fn branch_length(&self) -> Option<f32> {
         if self.length == NO_LENGTH {
             None
@@ -39,6 +71,18 @@ impl Node {
 ///
 /// Leaves occupy indices `0..k` in input order; internal nodes follow in the
 /// order they were created, so the root is always the last node.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::Tree;
+///
+/// let names: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+/// let mut t = Tree::leaves(&names);
+/// t.join(3, 0, 1, 0.1, 0.2);
+/// t.join(4, 3, 2, 0.05, 0.3);
+/// assert_eq!(t.to_newick(), "((a:0.10000,b:0.20000):0.05000,c:0.30000);\n");
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tree {
     nodes: Vec<Node>,
@@ -47,6 +91,17 @@ pub struct Tree {
 impl Tree {
     /// A forest of `k` unconnected leaves. Neighbor joining fills in the
     /// internal nodes with [`join`](Tree::join).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Tree;
+    ///
+    /// let names: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+    /// let t = Tree::leaves(&names);
+    /// assert_eq!(t.num_leaves(), 2);
+    /// assert_eq!(t.nodes().len(), 3); // 2 leaves + 1 internal node
+    /// ```
     pub fn leaves(names: &[String]) -> Self {
         let k = names.len();
         let mut nodes = Vec::with_capacity(2 * k.max(1) - 1);
@@ -60,27 +115,80 @@ impl Tree {
     }
 
     /// All nodes, leaves first.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Tree;
+    ///
+    /// let names: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+    /// let t = Tree::leaves(&names);
+    /// assert_eq!(t.nodes()[0].name, "a");
+    /// assert_eq!(t.nodes()[1].name, "b");
+    /// ```
     pub fn nodes(&self) -> &[Node] {
         &self.nodes
     }
 
     /// Mutable access to a node.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Tree;
+    ///
+    /// let names: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+    /// let mut t = Tree::leaves(&names);
+    /// t.node_mut(0).length = 0.5;
+    /// assert_eq!(t.nodes()[0].length, 0.5);
+    /// ```
     pub fn node_mut(&mut self, i: usize) -> &mut Node {
         &mut self.nodes[i]
     }
 
     /// Number of leaves.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Tree;
+    ///
+    /// let names: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+    /// let t = Tree::leaves(&names);
+    /// assert_eq!(t.num_leaves(), 3);
+    /// ```
     pub fn num_leaves(&self) -> usize {
         self.nodes.len().div_ceil(2)
     }
 
     /// Index of the root node.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Tree;
+    ///
+    /// let names: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+    /// let t = Tree::leaves(&names);
+    /// assert_eq!(t.root(), 4); // 2 * 3 - 1 nodes, zero-indexed
+    /// ```
     pub fn root(&self) -> usize {
         self.nodes.len() - 1
     }
 
     /// Make `parent` the parent of `left` and `right`, assigning the two
     /// branch lengths.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Tree;
+    ///
+    /// let names: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+    /// let mut t = Tree::leaves(&names);
+    /// t.join(2, 0, 1, 0.1, 0.2);
+    /// assert_eq!(t.to_newick(), "(a:0.10000,b:0.20000);\n");
+    /// ```
     pub fn join(&mut self, parent: usize, left: usize, right: usize, len_l: f32, len_r: f32) {
         self.nodes[parent].left = Some(left as u32);
         self.nodes[parent].right = Some(right as u32);
@@ -99,6 +207,23 @@ impl Tree {
     /// `n - 1` zero-length internal nodes, the whole group carrying the
     /// representative's original branch length. Leaves keep their input
     /// order; internal nodes are in post-order, so the root stays last.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Tree;
+    ///
+    /// // Representatives a(0) and b(1), with b standing for two identical
+    /// // sequences b and b2.
+    /// let reps: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+    /// let mut t = Tree::leaves(&reps);
+    /// t.join(2, 0, 1, 0.1, 0.2);
+    /// let all: Vec<String> = ["a", "b", "b2"].iter().map(|s| s.to_string()).collect();
+    /// let groups = vec![vec![0], vec![1, 2]];
+    /// let e = t.expand_duplicates(&groups, &all);
+    /// assert_eq!(e.num_leaves(), 3);
+    /// assert_eq!(e.to_newick(), "(a:0.10000,(b:0.00000,b2:0.00000):0.20000);\n");
+    /// ```
     pub fn expand_duplicates(&self, groups: &[Vec<usize>], all_names: &[String]) -> Tree {
         assert_eq!(self.num_leaves(), groups.len());
         let k = all_names.len();
@@ -139,6 +264,17 @@ impl Tree {
     }
 
     /// Serialise as Newick with five-decimal branch lengths, ending in `;\n`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Tree;
+    ///
+    /// let names: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+    /// let mut t = Tree::leaves(&names);
+    /// t.join(2, 0, 1, 0.1, 0.2);
+    /// assert_eq!(t.to_newick(), "(a:0.10000,b:0.20000);\n");
+    /// ```
     pub fn to_newick(&self) -> String {
         let mut out = Vec::with_capacity(self.nodes.len() * 16);
         self.write_newick(&mut out).expect("writing to a Vec cannot fail");
@@ -147,6 +283,20 @@ impl Tree {
 
     /// Write Newick to a sink. Uses an explicit stack, so very unbalanced
     /// trees (hundreds of thousands of leaves) do not overflow the call stack.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::Tree;
+    /// use std::io::Cursor;
+    ///
+    /// let names: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+    /// let mut t = Tree::leaves(&names);
+    /// t.join(2, 0, 1, 0.1, 0.2);
+    /// let mut buf = Cursor::new(Vec::new());
+    /// t.write_newick(&mut buf).unwrap();
+    /// assert_eq!(buf.into_inner(), b"(a:0.10000,b:0.20000);\n");
+    /// ```
     pub fn write_newick<W: Write + ?Sized>(&self, w: &mut W) -> std::io::Result<()> {
         enum Step {
             Enter(usize),
@@ -228,6 +378,15 @@ fn push_length(buf: &mut String, len: f32) {
 /// Format a branch length with five decimals, rounding half away from zero
 /// on the exact decimal expansion (the reference used Java's `%.5f`, which
 /// rounds HALF_UP; Rust's formatter rounds half to even).
+///
+/// # Examples
+///
+/// ```
+/// use ninja::tree::format_len5;
+///
+/// assert_eq!(format_len5(0.1), "0.10000");
+/// assert_eq!(format_len5(0.015625), "0.01563"); // exact tie, rounds up
+/// ```
 pub fn format_len5(x: f32) -> String {
     // f32 -> f64 is exact; printing with 12 decimals is well beyond the
     // point where a tie at the sixth decimal can be affected, since a tie is

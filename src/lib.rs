@@ -69,9 +69,23 @@ pub use pipeline::{run, InputKind, Options, OutputKind, RunOutput};
 pub use tree::Tree;
 
 /// Crate version string, as reported by `ninja --version`.
+///
+/// # Examples
+///
+/// ```
+/// let parts: Vec<&str> = ninja::VERSION.split('.').collect();
+/// assert_eq!(parts.len(), 3); // major.minor.patch
+/// ```
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Citation printed in the startup banner.
+///
+/// # Examples
+///
+/// ```
+/// assert!(ninja::CITATION.contains("Wheeler, T.J. 2009"));
+/// assert!(ninja::CITATION.contains("WABI 2009"));
+/// ```
 pub const CITATION: &str = "Wheeler, T.J. 2009. Large-scale neighbor-joining with NINJA.\n\
 In S.L. Salzberg and T. Warnow (Eds.), Proceedings of\n\
 the 9th Workshop on Algorithms in Bioinformatics.\n\

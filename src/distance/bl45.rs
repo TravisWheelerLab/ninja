@@ -6,6 +6,20 @@
 /// `ARNDCQEGHILKMFPSTWYV`. Zero on the diagonal. These are the values
 /// FastTree derives from BLOSUM45 (its `matrixBLOSUM45`), which the
 /// reference NINJA used unchanged.
+///
+/// # Examples
+///
+/// This table lives in a private module. From outside the crate, reach it
+/// through [`SubstitutionMatrix::blosum45`](crate::distance::SubstitutionMatrix::blosum45)'s
+/// [`dissimilarities`](crate::distance::SubstitutionMatrix::dissimilarities), which returns it unchanged.
+///
+/// ```
+/// use ninja::distance::SubstitutionMatrix;
+///
+/// let d = SubstitutionMatrix::blosum45().dissimilarities();
+/// assert_eq!(d[0][0], 0.0);
+/// assert_eq!(d[0][1], 1.31097856); // A-R
+/// ```
 pub const BL45: [[f32; 20]; 20] = [
     // A
     [

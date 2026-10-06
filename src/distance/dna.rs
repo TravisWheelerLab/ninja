@@ -8,6 +8,23 @@ const SITES_PER_WORD: usize = 32;
 const LOW_BITS: u64 = 0x5555_5555_5555_5555;
 
 /// Alignment rows packed two bits per site with a per-site validity mask.
+///
+/// This type backs [`DistanceCalculator::calc`](super::DistanceCalculator::calc)
+/// for DNA alignments but is not reachable outside the crate, since the
+/// `dna` module is private; the example below drives it through that public
+/// entry point instead.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::alphabet::Correction;
+/// use ninja::distance::DistanceCalculator;
+/// use ninja::io::fasta::parse_fasta;
+///
+/// let aln = parse_fasta(b">a\nACGTACGTAC\n>b\nACGTACGTAG\n", None).unwrap();
+/// let calc = DistanceCalculator::new(&aln, Some(Correction::None)).unwrap();
+/// assert!((calc.calc(0, 1) - 0.1).abs() < 1e-6);
+/// ```
 #[derive(Debug, Clone)]
 pub struct PackedDna {
     words: usize,
@@ -24,6 +41,24 @@ pub struct PackedDna {
 
 impl PackedDna {
     /// Pack sequences. Any byte other than `A C G T` is treated as a gap.
+    ///
+    /// `dna` is a private module, so `PackedDna` cannot be named from outside
+    /// the crate; the example reaches this constructor indirectly, through
+    /// [`DistanceCalculator::new`](super::DistanceCalculator::new) on a DNA
+    /// alignment that includes a gap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::alphabet::Correction;
+    /// use ninja::distance::DistanceCalculator;
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGT-CGTAC\n>b\nACGTACGTAG\n", None).unwrap();
+    /// let calc = DistanceCalculator::new(&aln, Some(Correction::None)).unwrap();
+    /// // The gap drops one comparable site, so only 9 of 10 columns count.
+    /// assert!((calc.calc(0, 1) - 1.0 / 9.0).abs() < 1e-6);
+    /// ```
     pub fn new(seqs: &[Vec<u8>]) -> Self {
         let n = seqs.len();
         let width = seqs.first().map_or(0, |s| s.len());
@@ -58,6 +93,24 @@ impl PackedDna {
     }
 
     /// Number of gap openings between a pair, for the onegap distance.
+    ///
+    /// Reached from outside the crate only through the `OneGap` correction on
+    /// [`DistanceCalculator::calc`](super::DistanceCalculator::calc), since
+    /// `dna` is a private module.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::alphabet::Correction;
+    /// use ninja::distance::DistanceCalculator;
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGT--AC\n>b\nACGTACAC\n>c\nAGGTAC-C\n", None).unwrap();
+    /// let calc = DistanceCalculator::new(&aln, Some(Correction::OneGap)).unwrap();
+    /// // `a` and `b` match at all 6 comparable sites; the one run of two gap
+    /// // columns in `a` counts as a single opening: (0 + 1) / (6 + 1).
+    /// assert!((calc.calc(0, 1) - 1.0 / 7.0).abs() < 1e-6);
+    /// ```
     #[inline]
     pub fn openings(&self, a: usize, b: usize) -> u32 {
         let w = self.words1;
@@ -73,6 +126,27 @@ impl PackedDna {
     }
 
     /// `(transitions, transversions, comparable_sites)` for a pair.
+    ///
+    /// These counts feed every DNA correction; with no correction applied,
+    /// the reported distance is exactly `(transitions + transversions) /
+    /// comparable_sites`. `dna` is a private module, so the example below
+    /// reaches `count` through
+    /// [`DistanceCalculator::calc`](super::DistanceCalculator::calc) rather
+    /// than calling it directly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::alphabet::Correction;
+    /// use ninja::distance::DistanceCalculator;
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGTACGTAC\n>b\nACGTACGTAG\n>c\nAGCTACGTAC\n", None).unwrap();
+    /// let calc = DistanceCalculator::new(&aln, Some(Correction::None)).unwrap();
+    /// // One mismatch out of ten comparable sites.
+    /// assert!((calc.calc(0, 1) - 0.1).abs() < 1e-6);
+    /// assert!((calc.calc(0, 2) - 0.2).abs() < 1e-6);
+    /// ```
     #[inline]
     pub fn count(&self, a: usize, b: usize) -> (u32, u32, u32) {
         let w = self.words;
@@ -100,7 +174,21 @@ impl PackedDna {
 ///
 /// Mirrors the reference arithmetic: proportions are computed in single
 /// precision, the logarithms in double precision, and the result is rounded
-/// back to single precision and capped.
+/// back to single precision and capped. `dna` is a private module, so
+/// `correct` is reachable from outside the crate only through
+/// [`DistanceCalculator::calc`](super::DistanceCalculator::calc).
+///
+/// # Examples
+///
+/// ```
+/// use ninja::alphabet::Correction;
+/// use ninja::distance::DistanceCalculator;
+/// use ninja::io::fasta::parse_fasta;
+///
+/// let aln = parse_fasta(b">a\nACGTACGTAC\n>b\nACGTACGTAG\n>c\nAGCTACGTAC\n", None).unwrap();
+/// let calc = DistanceCalculator::new(&aln, Some(Correction::Kimura2)).unwrap();
+/// assert!((calc.calc(0, 1) - 0.108_466_1).abs() < 1e-6);
+/// ```
 #[inline]
 pub fn correct(transitions: u32, transversions: u32, sites: u32, corr: Correction) -> f32 {
     let maxscore = corr.max_distance();

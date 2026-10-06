@@ -10,6 +10,19 @@ use crate::io::phylip::{PhylipMatrix, SCALE};
 ///
 /// Row `i` holds the distances to `i+1..k`, packed contiguously. The
 /// in-memory engine mutates entries in place as nodes are merged.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::distance::{DistanceCalculator, DistanceMatrix};
+/// use ninja::io::fasta::parse_fasta;
+///
+/// let aln = parse_fasta(b">a\nACGT\n>b\nACGA\n>c\nAGGT\n", None).unwrap();
+/// let calc = DistanceCalculator::new(&aln, None).unwrap();
+/// let m = DistanceMatrix::from_calculator(&calc);
+/// assert_eq!(m.get(0, 1), m.get(1, 0));
+/// assert_eq!(m.len(), 3);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DistanceMatrix {
     k: usize,
@@ -18,6 +31,15 @@ pub struct DistanceMatrix {
 
 impl DistanceMatrix {
     /// Fixed-point scale of the stored values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceMatrix;
+    ///
+    /// assert_eq!(DistanceMatrix::SCALE, 100_000_000);
+    /// assert_eq!(DistanceMatrix::quantize(1.0), DistanceMatrix::SCALE as i32);
+    /// ```
     pub const SCALE: i64 = SCALE;
 
     /// Convert a real-valued distance to the stored fixed-point form.
@@ -26,12 +48,31 @@ impl DistanceMatrix {
     /// nearest `1e-6`, which is the precision the Phylip writer prints, so a
     /// tree built from an alignment and one built from the written matrix
     /// see identical distances.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceMatrix;
+    ///
+    /// assert_eq!(DistanceMatrix::quantize(0.25), 25_000_000);
+    /// assert_eq!(DistanceMatrix::quantize(0.123_456_785), 12_345_700);
+    /// ```
     #[inline]
     pub fn quantize(d: f64) -> i32 {
         100 * (((SCALE as f64 * d) + 50.0) / 100.0) as i32
     }
 
     /// An all-zero matrix for `k` taxa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceMatrix;
+    ///
+    /// let m = DistanceMatrix::zeros(3);
+    /// assert_eq!(m.len(), 3);
+    /// assert_eq!(m.get(0, 1), 0);
+    /// ```
     pub fn zeros(k: usize) -> Self {
         DistanceMatrix { k, data: vec![0; Self::tri_len(k)] }
     }
@@ -43,6 +84,18 @@ impl DistanceMatrix {
     /// Compute every pairwise distance from an alignment, in parallel.
     ///
     /// Rows are distributed across the current rayon thread pool.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::{DistanceCalculator, DistanceMatrix};
+    /// use ninja::io::fasta::parse_fasta;
+    ///
+    /// let aln = parse_fasta(b">a\nACGT\n>b\nACGA\n>c\nAGGT\n", None).unwrap();
+    /// let calc = DistanceCalculator::new(&aln, None).unwrap();
+    /// let m = DistanceMatrix::from_calculator(&calc);
+    /// assert_eq!(m.as_slice().len(), 3);
+    /// ```
     pub fn from_calculator(calc: &DistanceCalculator) -> Self {
         let k = calc.len();
         let mut m = Self::zeros(k);
@@ -65,6 +118,18 @@ impl DistanceMatrix {
     }
 
     /// Build from a parsed Phylip matrix (already in `1e-8` units).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceMatrix;
+    /// use ninja::io::phylip::read_phylip_from;
+    ///
+    /// let lower = "3\na\nb 0.5\nc 0.25 0.75\n";
+    /// let p = read_phylip_from(lower.as_bytes()).unwrap();
+    /// let m = DistanceMatrix::from_phylip(&p);
+    /// assert!((m.get_f64(0, 2) - 0.25).abs() < 1e-9);
+    /// ```
     pub fn from_phylip(p: &PhylipMatrix) -> Self {
         let k = p.len();
         let mut m = Self::zeros(k);
@@ -80,12 +145,29 @@ impl DistanceMatrix {
     }
 
     /// Number of taxa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceMatrix;
+    ///
+    /// assert_eq!(DistanceMatrix::zeros(5).len(), 5);
+    /// ```
     #[inline]
     pub fn len(&self) -> usize {
         self.k
     }
 
     /// True when there are no taxa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceMatrix;
+    ///
+    /// assert!(DistanceMatrix::zeros(0).is_empty());
+    /// assert!(!DistanceMatrix::zeros(2).is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.k == 0
     }
@@ -116,6 +198,17 @@ impl DistanceMatrix {
     }
 
     /// Distance between `i` and `j` (`i != j`), in fixed-point units.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceMatrix;
+    ///
+    /// let mut m = DistanceMatrix::zeros(3);
+    /// m.set(0, 1, 500);
+    /// assert_eq!(m.get(0, 1), 500);
+    /// assert_eq!(m.get(1, 0), 500);
+    /// ```
     #[inline]
     pub fn get(&self, i: usize, j: usize) -> i32 {
         let (a, b) = if i < j { (i, j) } else { (j, i) };
@@ -123,6 +216,16 @@ impl DistanceMatrix {
     }
 
     /// Overwrite the distance between `i` and `j` (`i != j`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceMatrix;
+    ///
+    /// let mut m = DistanceMatrix::zeros(3);
+    /// m.set(1, 2, 42);
+    /// assert_eq!(m.get(2, 1), 42);
+    /// ```
     #[inline]
     pub fn set(&mut self, i: usize, j: usize, v: i32) {
         let (a, b) = if i < j { (i, j) } else { (j, i) };
@@ -131,11 +234,31 @@ impl DistanceMatrix {
     }
 
     /// Distance between `i` and `j` as a real number.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceMatrix;
+    ///
+    /// let mut m = DistanceMatrix::zeros(3);
+    /// m.set(0, 1, DistanceMatrix::quantize(0.25));
+    /// assert!((m.get_f64(0, 1) - 0.25).abs() < 1e-9);
+    /// ```
     pub fn get_f64(&self, i: usize, j: usize) -> f64 {
         self.get(i, j) as f64 / SCALE as f64
     }
 
     /// The packed upper triangle.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::distance::DistanceMatrix;
+    ///
+    /// let mut m = DistanceMatrix::zeros(3);
+    /// m.set(0, 1, 7);
+    /// assert_eq!(m.as_slice(), &[7, 0, 0]);
+    /// ```
     pub fn as_slice(&self) -> &[i32] {
         &self.data
     }

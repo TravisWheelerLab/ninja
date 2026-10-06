@@ -17,6 +17,23 @@ const LENGTH_SCALE: f32 = 200_000_000.0;
 ///
 /// `names.len()` must equal `d.len()`. The matrix is consumed because it is
 /// updated in place as taxa are joined.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::{nj, DistanceMatrix, NjParams};
+///
+/// let mut matrix = DistanceMatrix::zeros(3);
+/// matrix.set(0, 1, DistanceMatrix::quantize(0.1));
+/// matrix.set(0, 2, DistanceMatrix::quantize(0.3));
+/// matrix.set(1, 2, DistanceMatrix::quantize(0.3));
+/// let names: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+///
+/// let params = NjParams { verbose: 0, ..NjParams::default() };
+/// let (tree, stats) = nj::inmem::build(&names, matrix, &params).unwrap();
+/// assert_eq!(tree.num_leaves(), 3);
+/// assert_eq!(stats.rebuilds, 1);
+/// ```
 pub fn build(names: &[String], d: DistanceMatrix, params: &NjParams) -> Result<(Tree, NjStats)> {
     let k = d.len();
     if names.len() != k {

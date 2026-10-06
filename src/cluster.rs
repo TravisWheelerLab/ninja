@@ -13,6 +13,16 @@ use rayon::prelude::*;
 
 /// Clusters of `k` items, numbered from 0 in order of each cluster's
 /// lowest-index member.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::cluster::single_linkage;
+///
+/// let clusters = single_linkage(3, 0.2, |i, j| if (i, j) == (0, 1) { 0.1 } else { 5.0 });
+/// assert_eq!(clusters.members, vec![vec![0, 1], vec![2]]);
+/// assert_eq!(clusters.id, vec![0, 0, 1]);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clusters {
     /// Cluster id of each item.
@@ -23,11 +33,29 @@ pub struct Clusters {
 
 impl Clusters {
     /// Number of clusters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::cluster::single_linkage;
+    ///
+    /// let clusters = single_linkage(4, 0.5, |_, _| 1.0);
+    /// assert_eq!(clusters.len(), 4);
+    /// ```
     pub fn len(&self) -> usize {
         self.members.len()
     }
 
     /// True when there are no items.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ninja::cluster::single_linkage;
+    ///
+    /// let clusters = single_linkage(0, 0.5, |_, _| 0.0);
+    /// assert!(clusters.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.members.is_empty()
     }
@@ -42,6 +70,15 @@ const ROWS_PER_CHUNK: usize = 256;
 /// `dist(i, j)` is called once for every pair `i < j`, in parallel across
 /// rows. The cutoff is applied as `dist <= cutoff` after widening the
 /// single-precision cutoff to double, as the reference did.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::cluster::single_linkage;
+///
+/// let clusters = single_linkage(3, 0.2, |i, j| if (i, j) == (0, 1) { 0.1 } else { 5.0 });
+/// assert_eq!(clusters.len(), 2);
+/// ```
 pub fn single_linkage(k: usize, cutoff: f32, dist: impl Fn(usize, usize) -> f64 + Sync) -> Clusters {
     let cutoff = cutoff as f64;
     let mut uf = UnionFind::new(k);
@@ -64,6 +101,15 @@ pub fn single_linkage(k: usize, cutoff: f32, dist: impl Fn(usize, usize) -> f64 
 }
 
 /// Cluster from a symmetric matrix given as a lookup, without parallelism.
+///
+/// # Examples
+///
+/// ```
+/// use ninja::cluster::single_linkage_serial;
+///
+/// let clusters = single_linkage_serial(3, 0.2, |i, j| if (i, j) == (0, 1) { 0.1 } else { 5.0 });
+/// assert_eq!(clusters.members, vec![vec![0, 1], vec![2]]);
+/// ```
 pub fn single_linkage_serial(k: usize, cutoff: f32, mut dist: impl FnMut(usize, usize) -> f64) -> Clusters {
     let cutoff = cutoff as f64;
     let mut uf = UnionFind::new(k);
