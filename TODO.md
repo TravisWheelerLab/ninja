@@ -67,6 +67,9 @@ Planned work, roughly in order.
   reports the unknown name and lists the built-ins; `SubstitutionMatrix::names()` keeps
   the message and the `match` in step. The three failure conventions themselves stay as
   they are, which Travis agreed to.
+- [x] 2026-10-06: Released 2.1.0, tagged `v2.1.0`, on crates.io, docs.rs built, GitHub
+  release published. 2.0.0 stays unyanked: it had 0 downloads, but crates.io cannot
+  replace a published version and resolution picks 2.1.0 regardless.
 - [x] 2026-10-05: Released 2.0.0, tagged `v2.0.0` and on crates.io. Made `nj::extmem`
   internal first, so `MemoryPlan`'s fields are not frozen by the stable API and the
   accounting can still change in 2.x.

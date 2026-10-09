@@ -43,6 +43,29 @@ Write a distance matrix instead, or start from one:
     ninja --out_type d alignment.fa > distances.phylip
     ninja --in_type d distances.phylip > tree.nwk
 
+The matrix is Phylip: the taxon count on the first line, then one row per
+taxon, each a name followed by its distances. ninja writes the full square
+with six decimals.
+
+    4
+    seq_a 0.000000 0.111572 0.234123 0.383119
+    seq_b 0.111572 0.000000 0.108466 0.239278
+    seq_c 0.234123 0.108466 0.000000 0.108466
+    seq_d 0.383119 0.239278 0.108466 0.000000
+
+The reader accepts more than that. A name is the first whitespace-separated
+field, so padding between columns is fine, and the reader takes only the
+first `i` values from row `i`, so the lower triangle works too.
+
+    4
+    seq_a
+    seq_b 0.111572
+    seq_c 0.234123 0.108466
+    seq_d 0.383119 0.239278 0.108466
+
+Both files give the same tree. A name cannot contain a space, because the
+first field ends there.
+
 Cluster sequences instead of building a tree (single linkage: two
 sequences share a cluster when a chain of pairs within the cutoff connects
 them):
