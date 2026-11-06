@@ -9,6 +9,9 @@
   14.6 s and its peak memory from 4.2 GB to 3.6 GB, with an identical tree.
   ninja prints under `-v` how the join loop's time divides between pulls,
   the update loop, inserts and rebuilds.
+* The update loop after each join keeps its state in registers and indexes
+  the matrix through a per-row table instead of a multiply. At 20,000 taxa
+  that is a further 0.8 s off the join loop, with the same tree.
 
 ## 2.1.0 (2026-10-06)
 

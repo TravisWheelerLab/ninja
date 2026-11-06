@@ -28,10 +28,20 @@ Planned work, roughly in order.
   cost is writing 2e8 entries per run, which packing cuts by a third. Microbenchmark of
   the sort alone, 2e8 entries in batches of 700: 12-byte copy and stable sort 3.84 s, in
   place unstable 3.11 s, packed u64 2.34 s, no sort 0.43 s.
-- More speed in the in-memory engine, what is left: the update loop (4.0 s of 14.6 at
-  20,000 taxa) is bound by cache misses on the triangular matrix; a square matrix would
-  turn its two reads into row streams at the cost of doubling the matrix. Bucketing is
-  1.1 s, part of it the per-batch allocation.
+- [x] 2026-11-06, decided against: a square matrix for the update loop. Measured the
+  loop per element with the matrix in L3 and out of it: 6,000 taxa (72 MB) 12.9 ns,
+  12,000 (288 MB) 15.0 ns, 20,000 (800 MB) 18.2 ns. The memory stall is about 5 of 18 ns,
+  so streaming reads could recover at most 1.0 s of 14.6, and the symmetric write would
+  become a scattered store and take part of that back; 2-5% for doubling the matrix.
+- [x] 2026-11-06: Hoisted the update loop onto local slices with a row-base table for
+  the matrix index. The disassembly showed the real cost: the orientation swap was already
+  a `cmov`, but every iteration reloaded `self`'s fields from the stack and wrote the
+  `fresh` length back to memory, with an `imul` per matrix access. Branch `update-loop`,
+  alternated against main at load 45: update 3.67 s to 3.10 s (18.2 to 15.5 ns per
+  element), join loop 14.15 s to 13.35 s, tree byte-identical.
+- More speed in the in-memory engine, what is left: bucketing 1.0 s, part of it the
+  per-batch allocation; the remaining 15 ns per element of the update loop is four
+  dependent loads and the bounds checks. Beyond that, I think the lever is algorithmic.
 - Reduce in-memory engine memory: the queues hold an entry for every pair
   (about 12 bytes each); 104 GB at 100,000 taxa.
 - External-memory engine, 20,000 taxa at a 100 MB budget (85.7 s on an idle machine,

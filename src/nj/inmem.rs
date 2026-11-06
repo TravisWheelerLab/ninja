@@ -584,23 +584,35 @@ impl<'a> Builder<'a> {
                 self.rows.push(x as u32);
                 x = self.active.next[x as usize];
             }
+            // The loop works on local slices: through `self`, the compiler
+            // reloads every field from the stack after each store, and the
+            // sum for the new row stays in a register (`r[ri]` is zero here).
             const AHEAD: usize = 12;
-            for idx in 0..self.rows.len() {
-                if idx + AHEAD < self.rows.len() {
-                    let ra = self.redirect[self.rows[idx + AHEAD] as usize] as usize;
-                    self.d.prefetch(ra, ri);
-                    self.d.prefetch(ra, rj);
+            let (data, base) = self.d.raw_mut();
+            let redirect = &self.redirect[..];
+            let r = &mut self.r[..];
+            let rows = &self.rows[..];
+            let fresh = &mut self.fresh;
+            let cell = |a: usize, b: usize| if a < b { base[a] + b - 1 } else { base[b] + a - 1 };
+            let mut sum_i: i64 = 0;
+            for idx in 0..rows.len() {
+                if idx + AHEAD < rows.len() {
+                    let ra = redirect[rows[idx + AHEAD] as usize] as usize;
+                    DistanceMatrix::prefetch_cell(data, cell(ra, ri));
+                    DistanceMatrix::prefetch_cell(data, cell(ra, rj));
                 }
-                let x = self.rows[idx] as i32;
-                let rx = self.redirect[x as usize] as usize;
-                let d_xi = self.d.get(rx, ri);
-                let d_xj = self.d.get(rx, rj);
+                let x = rows[idx] as i32;
+                let rx = redirect[x as usize] as usize;
+                let ci = cell(rx, ri);
+                let d_xi = data[ci];
+                let d_xj = data[cell(rx, rj)];
                 let tmp = (d_xi + d_xj - d_ij) / 2;
-                self.r[ri] += tmp as i64;
-                self.r[rx] += tmp as i64 - (d_xi as i64 + d_xj as i64);
-                self.d.set(rx, ri, tmp);
-                self.fresh.push((x, rx as u32, tmp));
+                sum_i += tmp as i64;
+                r[rx] += tmp as i64 - (d_xi as i64 + d_xj as i64);
+                data[ci] = tmp;
+                fresh.push((x, rx as u32, tmp));
             }
+            r[ri] = sum_i;
 
             new_k -= 1;
             t_update += t_join.elapsed();

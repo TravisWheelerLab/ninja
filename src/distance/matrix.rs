@@ -27,6 +27,10 @@ use crate::io::phylip::{PhylipMatrix, SCALE};
 pub struct DistanceMatrix {
     k: usize,
     data: Vec<i32>,
+    /// `row_base[i] + j - 1` is the index of cell `(i, j)` for `i < j`:
+    /// where row `i` starts in the packed triangle, less `i`, so that an
+    /// index is an add rather than a multiply.
+    row_base: Vec<usize>,
 }
 
 impl DistanceMatrix {
@@ -74,7 +78,8 @@ impl DistanceMatrix {
     /// assert_eq!(m.get(0, 1), 0);
     /// ```
     pub fn zeros(k: usize) -> Self {
-        DistanceMatrix { k, data: vec![0; Self::tri_len(k)] }
+        let row_base = (0..k).map(|i| i * (2 * k - i - 1) / 2 - i).collect();
+        DistanceMatrix { k, data: vec![0; Self::tri_len(k)], row_base }
     }
 
     fn tri_len(k: usize) -> usize {
@@ -138,7 +143,8 @@ impl DistanceMatrix {
                 let v = p.lower[j][i];
                 // Match the quantisation applied to computed distances.
                 let v = 100 * ((v + 50) / 100);
-                m.data[Self::index(k, i, j)] = v.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+                let idx = m.index(i, j);
+                m.data[idx] = v.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
             }
         }
         m
@@ -173,27 +179,34 @@ impl DistanceMatrix {
     }
 
     #[inline]
-    fn index(k: usize, i: usize, j: usize) -> usize {
-        debug_assert!(i < j && j < k);
-        i * (2 * k - i - 1) / 2 + (j - i - 1)
+    fn index(&self, i: usize, j: usize) -> usize {
+        debug_assert!(i < j && j < self.k);
+        self.row_base[i] + j - 1
     }
 
-    /// Hint the cache that `(i, j)` will be read soon.
+    /// The packed triangle and its row-base table, for the engine's update
+    /// loop, which indexes the matrix itself so that its state stays in
+    /// registers. Cell `(a, b)` with `a < b` is at `row_base[a] + b - 1`.
+    #[inline]
+    pub(crate) fn raw_mut(&mut self) -> (&mut [i32], &[usize]) {
+        (&mut self.data, &self.row_base)
+    }
+
+    /// Hint the cache to fetch the cell at `idx`, which need not be in
+    /// bounds; the hint has no architectural effect.
     #[inline]
     #[allow(unsafe_code)]
-    pub(crate) fn prefetch(&self, i: usize, j: usize) {
-        let (a, b) = if i < j { (i, j) } else { (j, i) };
-        let idx = Self::index(self.k, a, b);
+    pub(crate) fn prefetch_cell(data: &[i32], idx: usize) {
         #[cfg(target_arch = "x86_64")]
         {
-            let p = self.data.as_ptr().wrapping_add(idx) as *const i8;
+            let p = data.as_ptr().wrapping_add(idx) as *const i8;
             // SAFETY: prefetch has no architectural effect and takes any
             // address; the pointer is derived from a live slice.
             unsafe { std::arch::x86_64::_mm_prefetch(p, std::arch::x86_64::_MM_HINT_T0) };
         }
         #[cfg(not(target_arch = "x86_64"))]
         {
-            let _ = idx;
+            let _ = (data, idx);
         }
     }
 
@@ -212,7 +225,7 @@ impl DistanceMatrix {
     #[inline]
     pub fn get(&self, i: usize, j: usize) -> i32 {
         let (a, b) = if i < j { (i, j) } else { (j, i) };
-        self.data[Self::index(self.k, a, b)]
+        self.data[self.index(a, b)]
     }
 
     /// Overwrite the distance between `i` and `j` (`i != j`).
@@ -229,8 +242,8 @@ impl DistanceMatrix {
     #[inline]
     pub fn set(&mut self, i: usize, j: usize, v: i32) {
         let (a, b) = if i < j { (i, j) } else { (j, i) };
-        let k = self.k;
-        self.data[Self::index(k, a, b)] = v;
+        let idx = self.index(a, b);
+        self.data[idx] = v;
     }
 
     /// Distance between `i` and `j` as a real number.
