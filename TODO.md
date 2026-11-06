@@ -39,9 +39,16 @@ Planned work, roughly in order.
   `fresh` length back to memory, with an `imul` per matrix access. Branch `update-loop`,
   alternated against main at load 45: update 3.67 s to 3.10 s (18.2 to 15.5 ns per
   element), join loop 14.15 s to 13.35 s, tree byte-identical.
-- More speed in the in-memory engine, what is left: bucketing 1.0 s, part of it the
-  per-batch allocation; the remaining 15 ns per element of the update loop is four
-  dependent loads and the bounds checks. Beyond that, I think the lever is algorithmic.
+- [x] 2026-11-06: Fused the bucketing pass into the update loop. The `fresh` buffer was
+  written at 12 bytes an entry and read back by a second pass; now each new distance is
+  packed straight into a bucket for the other node's cluster, and the queue mapping is
+  applied after the loop once the new node's cluster is known. Alternated at load 58:
+  insert 3.33 s to 2.30 s, update 3.15 s to 3.65 s (the bucket push costs more than a
+  stream push), join loop 13.5 s to 13.0 s, byte-identical tree. The earlier note blaming
+  the per-batch allocation was wrong: 30 small allocations a join is 0.06 s.
+- In-memory engine speed, done for now: 16.9 s to 13.0 s at 20,000 taxa on 2026-11-06.
+  What is left is under a second (bucket pushes into 30 buffers, bounds checks, four
+  dependent loads an element), and I think the next lever is algorithmic.
 - Reduce in-memory engine memory: the queues hold an entry for every pair
   (about 12 bytes each); 104 GB at 100,000 taxa.
 - External-memory engine, 20,000 taxa at a 100 MB budget (85.7 s on an idle machine,

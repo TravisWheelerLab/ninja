@@ -76,11 +76,10 @@ struct Builder<'a> {
     heaps: Vec<PairQueue>,
     /// Scratch: active node indices for the update loop.
     rows: Vec<u32>,
-    /// Scratch: `(node, row, new distance)` for every active node, filled
-    /// by the update loop and consumed by the insert loop.
-    fresh: Vec<(i32, u32, i32)>,
-    /// Scratch: the insert loop's entries bucketed by queue and packed
-    /// with `PairQueue::pack`, handed over as one batch each.
+    /// Scratch: the new node's entries, packed with `PairQueue::pack` and
+    /// bucketed by the other node's cluster as the update loop computes
+    /// them. The queue each bucket belongs to is known once the new node
+    /// has a cluster, after the loop.
     batches: Vec<Vec<u64>>,
 
     cand_d: Vec<i32>,
@@ -125,8 +124,7 @@ impl<'a> Builder<'a> {
             clust_percentiles: vec![0; cc],
             clusters_by_size: vec![0; cc],
             heaps: (0..cc * cc).map(|_| PairQueue::new(params.reference_order)).collect(),
-            fresh: Vec::with_capacity(k),
-            batches: (0..cc * cc).map(|_| Vec::new()).collect(),
+            batches: (0..cc).map(|_| Vec::new()).collect(),
             rows: Vec::with_capacity(k),
             cand_d: Vec::with_capacity(10_000),
             cand_i: Vec::with_capacity(10_000),
@@ -348,7 +346,6 @@ impl<'a> Builder<'a> {
         let mut t_update = Duration::ZERO;
         let mut t_insert = Duration::ZERO;
         let mut t_rebuild = Duration::ZERO;
-        let mut t_bucket = Duration::ZERO;
 
         while next_internal < total {
             let next_i32 = next_internal as i32;
@@ -572,10 +569,12 @@ impl<'a> Builder<'a> {
             self.active.remove(best_j as usize);
 
             // New distances and row sums. The new node takes over row `ri`.
-            // The new distances are also kept in `fresh` so that the heap
-            // inserts below need not re-read the matrix.
+            // Each new distance goes straight into the batch for the other
+            // node's cluster, packed for its queue.
             let d_ij = self.d.get(ri, rj);
-            self.fresh.clear();
+            for b in self.batches.iter_mut() {
+                b.clear();
+            }
             // Collect the active rows first so that rows a few steps ahead
             // can be prefetched.
             self.rows.clear();
@@ -592,7 +591,8 @@ impl<'a> Builder<'a> {
             let redirect = &self.redirect[..];
             let r = &mut self.r[..];
             let rows = &self.rows[..];
-            let fresh = &mut self.fresh;
+            let assign = &self.clust_assign[..];
+            let batches = &mut self.batches[..];
             let cell = |a: usize, b: usize| if a < b { base[a] + b - 1 } else { base[b] + a - 1 };
             let mut sum_i: i64 = 0;
             for idx in 0..rows.len() {
@@ -610,7 +610,9 @@ impl<'a> Builder<'a> {
                 sum_i += tmp as i64;
                 r[rx] += tmp as i64 - (d_xi as i64 + d_xj as i64);
                 data[ci] = tmp;
-                fresh.push((x, rx as u32, tmp));
+                // The pair reads `(x, new)` when x's row is below the new
+                // node's, `(new, x)` otherwise.
+                batches[assign[rx] as usize].push(PairQueue::pack(tmp, x, rx < ri));
             }
             r[ri] = sum_i;
 
@@ -639,22 +641,14 @@ impl<'a> Builder<'a> {
                     }
                 }
                 let cl_new = self.clust_assign[ri];
-                // Bucket the new node's entries by queue, then hand each
-                // queue its batch as one sorted run rather than one sift-up
-                // per entry. Each queue still receives its entries in
-                // `fresh` order, which is what reference-order mode needs.
-                for idx in 0..self.fresh.len() {
-                    let (x, rx, dist) = self.fresh[idx];
-                    let rx = rx as usize;
-                    let h = self.heap_index(self.clust_assign[rx], cl_new);
-                    // The pair reads `(x, new)` when x's row is below the
-                    // new node's, `(new, x)` otherwise.
-                    self.batches[h].push(PairQueue::pack(dist, x, rx < ri));
-                }
-                t_bucket += t_ins.elapsed();
-                for h in 0..self.batches.len() {
-                    if !self.batches[h].is_empty() {
-                        self.heaps[h].push_batch(next_i32, &mut self.batches[h]);
+                // Hand each cluster's batch to its queue as one sorted run
+                // rather than one sift-up per entry. A queue receives its
+                // entries in active-row order, which is what reference-order
+                // mode needs.
+                for c in 0..cc {
+                    if !self.batches[c].is_empty() {
+                        let h = self.heap_index(c as u32, cl_new);
+                        self.heaps[h].push_batch(next_i32, &mut self.batches[c]);
                     }
                 }
                 self.redirect[next_internal] = ri as i32;
@@ -665,8 +659,8 @@ impl<'a> Builder<'a> {
 
         if verbose >= 2 {
             eprintln!(
-                "join loop: pull {:.2?}, update {:.2?}, insert {:.2?} (bucketing {:.2?}), rebuild {:.2?}",
-                t_pull, t_update, t_insert, t_bucket, t_rebuild
+                "join loop: pull {:.2?}, update {:.2?}, insert {:.2?}, rebuild {:.2?}",
+                t_pull, t_update, t_insert, t_rebuild
             );
         }
         if verbose >= 1 {
