@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+* The in-memory engine inserts each join's new distances as one sorted run
+  per cluster-pair queue instead of one heap push per entry, and packs each
+  entry of such a run into eight bytes, since the new node is common to the
+  run and is stored once. At 20,000 taxa the join loop goes from 16.9 s to
+  14.6 s and its peak memory from 4.2 GB to 3.6 GB, with an identical tree.
+  ninja prints under `-v` how the join loop's time divides between pulls,
+  the update loop, inserts and rebuilds.
+
 ## 2.1.0 (2026-10-06)
 
 * ninja clamps a negative branch length to zero and reports how many it

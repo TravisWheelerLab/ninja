@@ -107,6 +107,15 @@ impl<K: PartialOrd + Copy, V: Copy> MinHeap<K, V> {
         Some(min)
     }
 
+    /// Replace the smallest entry and restore the heap: one sift down
+    /// instead of a pop and a push. The heap must not be empty.
+    #[inline]
+    pub fn replace_top(&mut self, key: K, value: V) {
+        debug_assert!(!self.items.is_empty());
+        self.items[0] = (key, value);
+        self.sift_down(0);
+    }
+
     /// Remove the last `k` entries of the backing array, returning them in
     /// array order. These are leaves of the heap and therefore not among the
     /// smallest keys, but they are not the largest either.
@@ -272,6 +281,33 @@ mod tests {
         while !ours.is_empty() {
             assert_eq!(ours.pop().unwrap().1, reference.delete_min());
         }
+    }
+
+    #[test]
+    fn replace_top_matches_pop_then_push() {
+        let entries: Vec<(i32, u32)> = (0..300u32).map(|i| ((i as i32 * 7919) % 97, i)).collect();
+        let mut a = MinHeap::new();
+        let mut b = MinHeap::new();
+        for &(k, v) in &entries {
+            a.push(k, v);
+            b.push(k, v);
+        }
+        for step in 0..200u32 {
+            let k = (step as i32 * 31) % 97;
+            a.replace_top(k, 1000 + step);
+            b.pop();
+            b.push(k, 1000 + step);
+            assert_eq!(a.peek().map(|e| e.0), b.peek().map(|e| e.0), "step {}", step);
+        }
+        let mut ka = Vec::new();
+        let mut kb = Vec::new();
+        while let Some((k, _)) = a.pop() {
+            ka.push(k);
+        }
+        while let Some((k, _)) = b.pop() {
+            kb.push(k);
+        }
+        assert_eq!(ka, kb);
     }
 
     #[test]

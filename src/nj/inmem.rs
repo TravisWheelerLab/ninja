@@ -1,5 +1,7 @@
 //! In-memory NINJA engine over a fixed-point distance matrix.
 
+use std::time::{Duration, Instant};
+
 use crate::distance::DistanceMatrix;
 use crate::error::{Error, Result};
 use rayon::prelude::*;
@@ -77,6 +79,9 @@ struct Builder<'a> {
     /// Scratch: `(node, row, new distance)` for every active node, filled
     /// by the update loop and consumed by the insert loop.
     fresh: Vec<(i32, u32, i32)>,
+    /// Scratch: the insert loop's entries bucketed by queue and packed
+    /// with `PairQueue::pack`, handed over as one batch each.
+    batches: Vec<Vec<u64>>,
 
     cand_d: Vec<i32>,
     cand_i: Vec<i32>,
@@ -121,6 +126,7 @@ impl<'a> Builder<'a> {
             clusters_by_size: vec![0; cc],
             heaps: (0..cc * cc).map(|_| PairQueue::new(params.reference_order)).collect(),
             fresh: Vec::with_capacity(k),
+            batches: (0..cc * cc).map(|_| Vec::new()).collect(),
             rows: Vec::with_capacity(k),
             cand_d: Vec::with_capacity(10_000),
             cand_i: Vec::with_capacity(10_000),
@@ -337,8 +343,16 @@ impl<'a> Builder<'a> {
         let mut max_t1val = vec![i64::MIN; cc];
         let mut max_t2val = vec![i64::MIN; cc];
 
+        // Time spent in each phase of the join loop, reported under -v.
+        let mut t_pull = Duration::ZERO;
+        let mut t_update = Duration::ZERO;
+        let mut t_insert = Duration::ZERO;
+        let mut t_rebuild = Duration::ZERO;
+        let mut t_bucket = Duration::ZERO;
+
         while next_internal < total {
             let next_i32 = next_internal as i32;
+            let t_loop = Instant::now();
 
             // Two largest row sums per cluster, for the Q lower bound.
             for c in 0..cc {
@@ -502,6 +516,9 @@ impl<'a> Builder<'a> {
                 ));
             }
 
+            t_pull += t_loop.elapsed();
+            let t_join = Instant::now();
+
             // Join the best pair.
             let best_i = self.cand_i[min_cand as usize];
             let best_j = self.cand_j[min_cand as usize];
@@ -586,6 +603,8 @@ impl<'a> Builder<'a> {
             }
 
             new_k -= 1;
+            t_update += t_join.elapsed();
+            let t_ins = Instant::now();
 
             if steps_until_rebuild == 0 {
                 self.redirect[next_internal] = ri as i32;
@@ -595,6 +614,7 @@ impl<'a> Builder<'a> {
                 }
                 self.cluster_and_heap(next_internal);
                 steps_until_rebuild = self.params.next_rebuild_steps(k, new_k);
+                t_rebuild += t_ins.elapsed();
             } else {
                 steps_until_rebuild -= 1;
                 // Move each cluster's ceiling to its (one iteration old)
@@ -607,18 +627,36 @@ impl<'a> Builder<'a> {
                     }
                 }
                 let cl_new = self.clust_assign[ri];
+                // Bucket the new node's entries by queue, then hand each
+                // queue its batch as one sorted run rather than one sift-up
+                // per entry. Each queue still receives its entries in
+                // `fresh` order, which is what reference-order mode needs.
                 for idx in 0..self.fresh.len() {
                     let (x, rx, dist) = self.fresh[idx];
                     let rx = rx as usize;
-                    let (a, b) = if rx < ri { (x, next_i32) } else { (next_i32, x) };
                     let h = self.heap_index(self.clust_assign[rx], cl_new);
-                    self.heaps[h].push(dist, (a, b));
+                    // The pair reads `(x, new)` when x's row is below the
+                    // new node's, `(new, x)` otherwise.
+                    self.batches[h].push(PairQueue::pack(dist, x, rx < ri));
+                }
+                t_bucket += t_ins.elapsed();
+                for h in 0..self.batches.len() {
+                    if !self.batches[h].is_empty() {
+                        self.heaps[h].push_batch(next_i32, &mut self.batches[h]);
+                    }
                 }
                 self.redirect[next_internal] = ri as i32;
                 next_internal += 1;
+                t_insert += t_ins.elapsed();
             }
         }
 
+        if verbose >= 2 {
+            eprintln!(
+                "join loop: pull {:.2?}, update {:.2?}, insert {:.2?} (bucketing {:.2?}), rebuild {:.2?}",
+                t_pull, t_update, t_insert, t_bucket, t_rebuild
+            );
+        }
         if verbose >= 1 {
             eprintln!("{} candidates added", self.stats.candidates_added);
             eprintln!("{} defunct nodes removed", self.stats.defunct_removed);

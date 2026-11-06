@@ -70,10 +70,15 @@ the matrix plus queue entries.
 
 Each cluster pair's entries are consumed in increasing distance order, and
 an entry whose node has been joined is discarded when it reaches the front.
-Most entries never move after a rebuild, so a rebuild stores them as a
-sorted run read through a cursor (`heap::PairQueue`), and only entries
-added since go into a binary heap; discarding a stale entry from the run
-costs a cursor increment rather than a sift-down. The rebuild itself
+Most entries never move after they are inserted, so the queue
+(`heap::PairQueue`) keeps bulk inserts as sorted runs read through cursors:
+the rebuild's run, and one run per join holding the new node's distances.
+The new node is common to a join's run, so the run stores it once and packs
+each entry into eight bytes, distance and other node, and sorting the run is
+a plain integer sort. A small heap of run fronts merges the runs, so
+discarding a stale entry costs a cursor increment and one sift in a heap of
+runs rather than a sift-down in a heap of entries; only single inserts go
+into a binary heap. The rebuild itself
 counts entries per cluster pair in parallel, allocates each run exactly,
 writes entries into disjoint slices in parallel, and sorts the runs in
 parallel. That makes a rebuild cheap enough that rebuilding every quarter

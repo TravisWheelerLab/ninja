@@ -18,11 +18,20 @@ Planned work, roughly in order.
   matrices cannot fail, and `by_name`'s `None` is a lookup answer rather than an error.
   The caller was the problem: see the `--matrix` seam fix below.
 - The minimum Rust version (1.85) is set by clap 4.6; CI builds with it.
-- More speed in the in-memory engine. Profile for 20,000 taxa (about
-  15 s): heap pushes of each new node's distances 6 s (4 s of it the
-  sift-up), the update loop 4 s, pulls 2 s, rebuilds 1 s. Radix-sorted
-  batches in place of the post-rebuild heaps would cut the pushes; the
-  update loop is bound by cache misses on the triangular matrix.
+- [x] 2026-11-06: Sorted per-join batches, packed to eight bytes an entry with the new
+  node stored once per run. 20,000 taxa, load about 2, `-T 8`, baseline and new
+  alternated: join loop 16.9 s to 14.6 s, peak 4.22 GB to 3.61 GB, identical tree.
+  Phases after, printed under `-v`: pull 1.95 s, update 3.99 s, insert 3.35 s (bucketing
+  1.06 s), rebuild 1.87 s. The sorted batches alone, with 12-byte entries, gained nothing:
+  the recorded "4 s of sift-up" was wrong, since a sift-up stops at the first parent that
+  is not larger and new distances are mid-range, so pushes were already near O(1). The
+  cost is writing 2e8 entries per run, which packing cuts by a third. Microbenchmark of
+  the sort alone, 2e8 entries in batches of 700: 12-byte copy and stable sort 3.84 s, in
+  place unstable 3.11 s, packed u64 2.34 s, no sort 0.43 s.
+- More speed in the in-memory engine, what is left: the update loop (4.0 s of 14.6 at
+  20,000 taxa) is bound by cache misses on the triangular matrix; a square matrix would
+  turn its two reads into row streams at the cost of doubling the matrix. Bucketing is
+  1.1 s, part of it the per-batch allocation.
 - Reduce in-memory engine memory: the queues hold an entry for every pair
   (about 12 bytes each); 104 GB at 100,000 taxa.
 - External-memory engine, 20,000 taxa at a 100 MB budget (85.7 s on an idle machine,
