@@ -77,7 +77,7 @@ Planned work, roughly in order.
   load 40 on a noisy machine: matrix reads 3.8 M to 1.38 M (4.0 s to 2.6-3.0 s), flushes
   3.5 s to 2.7-3.4 s, update phase 12.8/9.1 s to 7.8/9.9 s, run 79.9/73.8 s to
   71.8/76.0 s, byte-identical tree, same peak. Signal about 2-3 s, noise about 2 s.
-  Kept: memory-trivial and accounted. Still uncommitted at the time of writing.
+  Kept: memory-trivial and accounted. Committed as `ea6676b` on `extmem-merges`.
 - [x] 2026-11-06: Priced 30% more memory for the read-chunk decision: the committed
   binary at `--memory 0.13` ran 69.3 s (peak 90.5 MB) against 73.8-79.9 s at 0.1, but
   merges were 31.9 s against 32.2-32.8 s, unchanged; the gain was in the pull phase,
@@ -86,10 +86,23 @@ Planned work, roughly in order.
   chunks could save 3-5 s of the 10 s of heap I/O. Read chunks are worth building,
   with the budget taught about them. That the pull phase is that sensitive to the
   cluster count is a separate lever worth a look (`TARGET_STRUCT_BYTES` in budget.rs).
-- The rebuild's pager in `cluster_and_heap` (extmem `mod.rs:277`) still pages at one
-  window width, 1.7 KB; it accounts for about 1.3 M of the 1.38 M matrix reads left after
-  the join-loop pagers went to 64 KB. Reuse `self.pager_i` there; no new buffer, no plan
-  change. Raised 2026-11-06.
+- [x] 2026-11-06: The rebuild's pager in `cluster_and_heap` paged at one window width,
+  1.7 KB, and was allocated per row; it now borrows `self.pager_i` (64 KB). Two
+  alternated pairs at load 42: matrix reads 1.38 M to 175 k, rebuild phase 6.41/8.38 s
+  to 6.14/6.80 s, wall 76.0/79.1 s to 75.3/78.6 s, byte-identical tree, peak unchanged.
+  Kept. The same commit splits `-v`'s heap I/O line into read and write time.
+- [x] 2026-11-06: Split heap I/O time, one run at load 42: reads 3.3 s for 2.8 M
+  one-block calls (1.2 us each, 11.5 GB), writes 7.8 s for 268 k ten-block calls (29 us
+  each, 15.1 GB). Merge read chunks can therefore save at most about 2.5 s, below the
+  noise, while a chunk of four costs about 23 MB at 20k taxa (69 live sources x 3 extra
+  blocks x 28 heaps) or, paid for inside the plan, a 2x smaller run size and one more
+  level. The writes are the lever: 2.7 rewrites an entry, set by the slot count.
+- [x] 2026-11-06: Measured four-block merge reads (prototype, no budget change), two
+  alternated pairs at load 42: read calls 2.8 M to 0.92 M but read time only 3.5 s to
+  2.8-2.9 s, merges 32.6/32.3 s to 31.7/32.4 s, wall 76.1 s to 74.9/74.8 s, peak
+  67.5-70.5 MB to 75.1-78.2 MB, trees identical. The read cost is the 11.5 GB copied,
+  not the call count, so chunks buy about 1 s for 5-8 MB. Reverted; not worth a budget
+  revamp. Dead end, with the 0.13 pricing above as its false lead.
 - External-memory engine, what is left at 20,000 taxa and 70 s: merges 31 s, of which
   I/O 9 s in 2.8 M one-block reads; each entry is written about 2.7 times. More slots
   per level would cut promotions (with 17 slots at this allowance, two per entry; with

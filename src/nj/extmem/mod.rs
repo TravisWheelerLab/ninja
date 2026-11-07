@@ -274,7 +274,10 @@ impl<'a> Builder<'a> {
         let mut i = self.active.first;
         while i < max_index_i {
             let ri = self.redirect[i as usize] as usize;
-            let mut pager = RowPager::new(ri, self.m.mem_cols);
+            // Borrow the update loop's 64 KB pager rather than allocate a
+            // window-width one per row; the budget counts only PAGER_BYTES.
+            let mut pager = std::mem::take(&mut self.pager_i);
+            pager.reset(ri);
             let mut j = self.active.next[i as usize];
             while j < max_index_i {
                 let rj = self.redirect[j as usize] as usize;
@@ -301,6 +304,7 @@ impl<'a> Builder<'a> {
                 }
                 j = self.active.next[j as usize];
             }
+            self.pager_i = pager;
             i = self.active.next[i as usize];
         }
         if !reference {
@@ -852,10 +856,11 @@ impl<'a> Builder<'a> {
                 hs.merge_levels, hs.merge_levels_calls, hs.merge_slots, hs.merge_slots_calls, hs.spill_sort, hs.store, hs.load
             );
             eprintln!(
-                "heap I/O: {:.2?} in {} reads ({:.2} GB) and {} writes ({:.2} GB)",
-                hs.io,
+                "heap I/O: {:.2?} in {} reads ({:.2} GB), {:.2?} in {} writes ({:.2} GB)",
+                hs.read_time,
                 hs.read_calls,
                 hs.read_bytes as f64 / 1e9,
+                hs.write_time,
                 hs.write_calls,
                 hs.write_bytes as f64 / 1e9
             );

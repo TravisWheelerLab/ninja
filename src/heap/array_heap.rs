@@ -88,7 +88,8 @@ pub(crate) struct HeapStats {
     pub store: Duration,
     pub load: Duration,
     /// Time inside the positioned read and write calls.
-    pub io: Duration,
+    pub read_time: Duration,
+    pub write_time: Duration,
     pub read_calls: u64,
     pub write_calls: u64,
     pub read_bytes: u64,
@@ -104,7 +105,8 @@ impl HeapStats {
         self.spill_sort += o.spill_sort;
         self.store += o.store;
         self.load += o.load;
-        self.io += o.io;
+        self.read_time += o.read_time;
+        self.write_time += o.write_time;
         self.read_calls += o.read_calls;
         self.write_calls += o.write_calls;
         self.read_bytes += o.read_bytes;
@@ -401,7 +403,7 @@ impl ArrayHeap {
     fn read_ints(&mut self, pos: u64, out: &mut [i32]) -> Result<usize> {
         let t = Instant::now();
         let got = self.read_ints_raw(pos, out)?;
-        self.stats.io += t.elapsed();
+        self.stats.read_time += t.elapsed();
         self.stats.read_calls += 1;
         self.stats.read_bytes += 4 * got as u64;
         Ok(got)
@@ -443,7 +445,7 @@ impl ArrayHeap {
     fn write_ints(&mut self, pos: u64, data: &[i32]) -> Result<()> {
         let t = Instant::now();
         self.write_ints_raw(pos, data)?;
-        self.stats.io += t.elapsed();
+        self.stats.write_time += t.elapsed();
         self.stats.write_calls += 1;
         self.stats.write_bytes += 4 * data.len() as u64;
         Ok(())
