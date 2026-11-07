@@ -37,6 +37,9 @@
   memory, with an identical tree. At 40,000 taxa the tree's topology is
   unchanged and a few dozen edge lengths move by 0.00001, because equal
   keys now leave the heaps in a different order.
+* The external engine's `-v` report shows how long the initial clustering
+  and heap build took, split into run sorts, stores and the pair walk, the
+  same split for later rebuilds, and how many candidate heaps were built.
 * The update loop after each join keeps its state in registers, indexes
   the matrix through a per-row table instead of a multiply, and packs each
   new distance straight into its batch instead of staging it for a second

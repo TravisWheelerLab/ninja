@@ -77,7 +77,19 @@ pub fn build(
     } else {
         params.clone()
     };
+    let t_init = Instant::now();
     let mut b = Builder::new(names, m, &params, tmp_dir, plan)?;
+    if params.verbose >= 1 {
+        eprintln!(
+            "initial clustering and {} cluster-pair heaps built ({:.1?}: run sorts {:.1?}, stores {:.1?}, the rest the pair walk)",
+            plan.cluster_count * (plan.cluster_count + 1) / 2,
+            t_init.elapsed(),
+            b.t_rebuild_sort,
+            b.t_rebuild_store
+        );
+        b.t_rebuild_sort = Duration::ZERO;
+        b.t_rebuild_store = Duration::ZERO;
+    }
     b.run()?;
     Ok((b.tree, b.stats))
 }
@@ -128,6 +140,11 @@ struct Builder<'a> {
     stats: NjStats,
     /// Branches clamped from a negative length to zero.
     clamped_lengths: u64,
+    /// Time inside rebuilds spent sorting staged runs and storing them.
+    t_rebuild_sort: Duration,
+    t_rebuild_store: Duration,
+    /// Candidate heaps created over the run (the simple list overflowed).
+    cand_heaps_built: u64,
 }
 
 impl<'a> Builder<'a> {
@@ -180,6 +197,9 @@ impl<'a> Builder<'a> {
             new_k: k,
             stats: NjStats::default(),
             clamped_lengths: 0,
+            t_rebuild_sort: Duration::ZERO,
+            t_rebuild_store: Duration::ZERO,
+            cand_heaps_built: 0,
         };
         b.cluster_and_heap(k)?;
         Ok(b)
@@ -294,10 +314,14 @@ impl<'a> Builder<'a> {
                     self.stage[h].push((d, (i, j)));
                     if self.stage[h].len() == run_size {
                         let mut run = std::mem::take(&mut self.stage[h]);
+                        let t = Instant::now();
                         run.sort_unstable_by(|a, b| {
                             a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
                         });
+                        self.t_rebuild_sort += t.elapsed();
+                        let t = Instant::now();
                         self.heaps[h].as_mut().unwrap().insert_sorted(&run, Some(redirect))?;
+                        self.t_rebuild_store += t.elapsed();
                         run.clear();
                         self.stage[h] = run;
                     }
@@ -311,9 +335,13 @@ impl<'a> Builder<'a> {
             for h in 0..cc * cc {
                 if !self.stage[h].is_empty() {
                     let mut run = std::mem::take(&mut self.stage[h]);
+                    let t = Instant::now();
                     run.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                    self.t_rebuild_sort += t.elapsed();
                     let redirect = &self.redirect;
+                    let t = Instant::now();
                     self.heaps[h].as_mut().unwrap().insert_sorted(&run, Some(redirect))?;
+                    self.t_rebuild_store += t.elapsed();
                     run.clear();
                     self.stage[h] = run;
                 }
@@ -388,6 +416,7 @@ impl<'a> Builder<'a> {
         }
 
         self.using_simple = false;
+        self.cand_heaps_built += 1;
         let mut heap = CandidateHeap::new(
             &self.tmp_dir,
             self.cand_heap_config,
@@ -845,6 +874,10 @@ impl<'a> Builder<'a> {
             eprintln!(
                 "join loop: pull {:.2?}, update {:.2?} (window flushes {:.2?}), insert {:.2?}, rebuild {:.2?}",
                 t_pull, t_update, t_flush, t_insert, t_rebuild
+            );
+            eprintln!(
+                "rebuilds: run sorts {:.2?}, stores {:.2?}; candidate heaps built {}",
+                self.t_rebuild_sort, self.t_rebuild_store, self.cand_heaps_built
             );
             let mio = self.m.io;
             eprintln!(
