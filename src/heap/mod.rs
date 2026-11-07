@@ -9,6 +9,7 @@ mod array_heap;
 mod binary_heap;
 mod pair_queue;
 
+pub(crate) use array_heap::HeapStats;
 pub use array_heap::{ArrayHeap, ArrayHeapConfig};
 pub use binary_heap::MinHeap;
 pub use pair_queue::{Entry, PairQueue};

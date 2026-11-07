@@ -23,8 +23,10 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
+#[cfg(not(unix))]
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use super::MinHeap;
 use crate::error::{Error, Result};
@@ -75,6 +77,42 @@ const MIN_RUN_BLOCKS: usize = 16;
 const UNFETCHED: f32 = f32::MIN_POSITIVE;
 
 /// A disk-backed min-priority queue of `(i, j, key)` triples.
+/// Where an external-memory heap's time and I/O go, summed by the engine
+/// over its heaps and reported under `-v`.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct HeapStats {
+    pub merge_levels: Duration,
+    pub merge_levels_calls: u64,
+    pub merge_slots: Duration,
+    pub merge_slots_calls: u64,
+    pub spill_sort: Duration,
+    pub store: Duration,
+    pub load: Duration,
+    /// Time inside the positioned read and write calls.
+    pub io: Duration,
+    pub read_calls: u64,
+    pub write_calls: u64,
+    pub read_bytes: u64,
+    pub write_bytes: u64,
+}
+
+impl HeapStats {
+    pub fn add(&mut self, o: &HeapStats) {
+        self.merge_levels += o.merge_levels;
+        self.merge_levels_calls += o.merge_levels_calls;
+        self.merge_slots += o.merge_slots;
+        self.merge_slots_calls += o.merge_slots_calls;
+        self.spill_sort += o.spill_sort;
+        self.store += o.store;
+        self.load += o.load;
+        self.io += o.io;
+        self.read_calls += o.read_calls;
+        self.write_calls += o.write_calls;
+        self.read_bytes += o.read_bytes;
+        self.write_bytes += o.write_bytes;
+    }
+}
+
 pub struct ArrayHeap {
     /// Sort spilled runs by heap-sort as the reference did (keeps its tie
     /// order) rather than with the standard sort.
@@ -102,6 +140,9 @@ pub struct ArrayHeap {
 
     read_buf: Vec<i32>,
     out_buf: Vec<i32>,
+    /// Byte image of one read or write, reused across calls.
+    io_buf: Vec<u8>,
+    pub(crate) stats: HeapStats,
 }
 
 impl std::fmt::Debug for ArrayHeap {
@@ -188,6 +229,8 @@ impl ArrayHeap {
             free_slots: Vec::new(),
             read_buf: vec![0; fields_per_block],
             out_buf: Vec::new(),
+            io_buf: Vec::new(),
+            stats: HeapStats::default(),
         };
         h.clear();
         Ok(h)
@@ -244,6 +287,7 @@ impl ArrayHeap {
         // Spill the trailing half of the heap array: it holds none of the
         // smallest keys, so those stay resident.
         let chopped = self.h1.chop_bottom(self.c_m);
+        let t = Instant::now();
         let run: Vec<(f32, Pair)> = if self.reference_order {
             let mut sorter = MinHeap::from_entries(chopped);
             let mut run = Vec::with_capacity(self.c_m);
@@ -256,6 +300,7 @@ impl ArrayHeap {
             run.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
             run
         };
+        self.stats.spill_sort += t.elapsed();
         self.place_run(&run, active)
     }
 
@@ -276,7 +321,11 @@ impl ArrayHeap {
         debug_assert!(run.len() <= self.c_m);
         let mut target = 0;
         while self.free_slots[target].is_empty() {
-            if self.merge_slots(target, active)? {
+            let t = Instant::now();
+            let freed = self.merge_slots(target, active)?;
+            self.stats.merge_slots += t.elapsed();
+            self.stats.merge_slots_calls += 1;
+            if freed {
                 break;
             }
             target += 1;
@@ -286,8 +335,21 @@ impl ArrayHeap {
                 ));
             }
         }
-        let slot = if target == 0 { self.store(0, run)? } else { self.merge_levels(target, run, active)? };
-        self.load(target, slot)
+        let t = Instant::now();
+        let slot = if target == 0 {
+            let slot = self.store(0, run)?;
+            self.stats.store += t.elapsed();
+            slot
+        } else {
+            let slot = self.merge_levels(target, run, active)?;
+            self.stats.merge_levels += t.elapsed();
+            self.stats.merge_levels_calls += 1;
+            slot
+        };
+        let t = Instant::now();
+        let loaded = self.load(target, slot);
+        self.stats.load += t.elapsed();
+        loaded
     }
 
     /// The smallest entry as `(i, j, key)`, if any.
@@ -337,29 +399,77 @@ impl ArrayHeap {
     }
 
     fn read_ints(&mut self, pos: u64, out: &mut [i32]) -> Result<usize> {
-        self.file.seek(SeekFrom::Start(pos))?;
-        let mut bytes = vec![0u8; out.len() * 4];
+        let t = Instant::now();
+        let got = self.read_ints_raw(pos, out)?;
+        self.stats.io += t.elapsed();
+        self.stats.read_calls += 1;
+        self.stats.read_bytes += 4 * got as u64;
+        Ok(got)
+    }
+
+    /// Read `out.len()` ints at byte `pos`, or fewer at the end of the file;
+    /// returns how many. One positioned read per call on Unix.
+    fn read_ints_raw(&mut self, pos: u64, out: &mut [i32]) -> Result<usize> {
+        let mut bytes = std::mem::take(&mut self.io_buf);
+        bytes.clear();
+        bytes.resize(out.len() * 4, 0);
         let mut got = 0;
+        #[cfg(unix)]
         while got < bytes.len() {
-            let r = self.file.read(&mut bytes[got..])?;
+            let r = std::os::unix::fs::FileExt::read_at(&self.file, &mut bytes[got..], pos + got as u64)?;
             if r == 0 {
                 break;
             }
             got += r;
         }
+        #[cfg(not(unix))]
+        {
+            self.file.seek(SeekFrom::Start(pos))?;
+            while got < bytes.len() {
+                let r = self.file.read(&mut bytes[got..])?;
+                if r == 0 {
+                    break;
+                }
+                got += r;
+            }
+        }
         for (k, chunk) in bytes[..got / 4 * 4].chunks_exact(4).enumerate() {
             out[k] = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         }
+        self.io_buf = bytes;
         Ok(got / 4)
     }
 
     fn write_ints(&mut self, pos: u64, data: &[i32]) -> Result<()> {
-        self.file.seek(SeekFrom::Start(pos))?;
-        let mut bytes = Vec::with_capacity(data.len() * 4);
+        let t = Instant::now();
+        self.write_ints_raw(pos, data)?;
+        self.stats.io += t.elapsed();
+        self.stats.write_calls += 1;
+        self.stats.write_bytes += 4 * data.len() as u64;
+        Ok(())
+    }
+
+    /// Write `data` at byte `pos`. One positioned write per call on Unix.
+    fn write_ints_raw(&mut self, pos: u64, data: &[i32]) -> Result<()> {
+        let mut bytes = std::mem::take(&mut self.io_buf);
+        bytes.clear();
+        bytes.reserve(data.len() * 4);
         for v in data {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
-        self.file.write_all(&bytes)?;
+        #[cfg(unix)]
+        std::os::unix::fs::FileExt::write_all_at(&self.file, &bytes, pos)?;
+        #[cfg(not(unix))]
+        {
+            self.file.seek(SeekFrom::Start(pos))?;
+            self.file.write_all(&bytes)?;
+        }
+        // Keep the buffer only when it is block-sized, the size every read
+        // uses; a merge chunk or a whole-run store kept per heap would add
+        // megabytes the memory plan does not account for.
+        if bytes.len() <= self.fields_per_block * 4 {
+            self.io_buf = bytes;
+        }
         Ok(())
     }
 
@@ -485,27 +595,79 @@ impl ArrayHeap {
         }
         self.drop_from_h2(|l, _| (l as usize) < target);
 
+        // One cursor per lower run, holding what the slot bookkeeping holds
+        // but as plain locals: the merge loop then indexes one vector per
+        // entry instead of a `Vec<Vec<_>>` several times over. Buffers are
+        // taken from the slots and handed back afterwards.
+        struct Cursor {
+            level: usize,
+            slot: usize,
+            base: u64,
+            pos: u64,
+            count: u64,
+            buf: Vec<i32>,
+            bp: usize,
+        }
+        let ns = self.num_slots;
+        let fpb = self.fields_per_block;
+        let mut cur: Vec<Cursor> = Vec::with_capacity(target * ns);
+        for level in 0..target {
+            for slot in 0..ns {
+                let mut buf = std::mem::take(&mut self.slot_buf[level][slot]);
+                let (pos, count) = (self.slot_pos[level][slot], self.slot_count[level][slot]);
+                if pos < count && buf.len() < fpb {
+                    buf.resize(fpb, 0);
+                }
+                cur.push(Cursor { level, slot, base: self.byte_pos(level, slot), pos, count, buf, bp: fpb });
+            }
+        }
+
+        /// The key at the cursor's head, refilling its block and skipping
+        /// entries that touch a dead node; `None` once the run is spent.
+        fn head(h: &mut ArrayHeap, c: &mut Cursor, active: Option<&[i32]>) -> Result<Option<f32>> {
+            loop {
+                if c.pos == c.count {
+                    return Ok(None);
+                }
+                if c.bp >= c.buf.len() {
+                    let pos = c.base + NUM_FIELDS as u64 * 4 * c.pos;
+                    h.read_ints(pos, &mut c.buf)?;
+                    c.bp = 0;
+                }
+                let (i, j) = (c.buf[c.bp], c.buf[c.bp + 1]);
+                let dead = match active {
+                    Some(a) => a[i as usize] == -1 || a[j as usize] == -1,
+                    None => false,
+                };
+                if dead {
+                    c.bp += NUM_FIELDS;
+                    c.pos += 1;
+                    h.n -= 1;
+                    continue;
+                }
+                return Ok(Some(f32::from_bits(c.buf[c.bp + 2] as u32)));
+            }
+        }
+
         let mut out = std::mem::take(&mut self.out_buf);
         out.clear();
-        let out_cap = OUT_BLOCKS * self.fields_per_block;
+        let out_cap = OUT_BLOCKS * fpb;
         let mut input_pos = 0;
         let mut new_cnt = 0u64;
         // k-way merge over the sources: the input run (source 0) and every
-        // lower slot, keyed by (head key, source index) so that ties go to
-        // the input run first, then to the lowest level and slot.
-        let ns = self.num_slots;
-        let mut srcs: MinHeap<(f32, u32), ()> = MinHeap::with_capacity(1 + target * ns);
+        // lower run, keyed by (head key, source index) so that ties go to
+        // the input run first, then to the lowest level and slot. A source
+        // that still has entries replaces its own head in place.
+        let mut srcs: MinHeap<(f32, u32), ()> = MinHeap::with_capacity(1 + cur.len());
         if !run.is_empty() {
             srcs.push((run[0].0, 0), ());
         }
-        for level in 0..target {
-            for slot in 0..ns {
-                if let Some(k) = self.head_key(level, slot, active)? {
-                    srcs.push((k, 1 + (level * ns + slot) as u32), ());
-                }
+        for (idx, c) in cur.iter_mut().enumerate() {
+            if let Some(k) = head(self, c, active)? {
+                srcs.push((k, 1 + idx as u32), ());
             }
         }
-        while let Some(((_, src), ())) = srcs.pop() {
+        while let Some(&((_, src), ())) = srcs.peek() {
             if src == 0 {
                 let (k, (i, j)) = run[input_pos];
                 out.push(i);
@@ -513,15 +675,21 @@ impl ArrayHeap {
                 out.push(k.to_bits() as i32);
                 input_pos += 1;
                 if input_pos < run.len() {
-                    srcs.push((run[input_pos].0, 0), ());
+                    srcs.replace_top((run[input_pos].0, 0), ());
+                } else {
+                    srcs.pop();
                 }
             } else {
-                let idx = (src - 1) as usize;
-                let (level, slot) = (idx / ns, idx % ns);
-                let t = self.take_head(level, slot);
-                out.extend_from_slice(&t);
-                if let Some(k) = self.head_key(level, slot, active)? {
-                    srcs.push((k, src), ());
+                let c = &mut cur[(src - 1) as usize];
+                let bp = c.bp;
+                out.extend_from_slice(&c.buf[bp..bp + NUM_FIELDS]);
+                c.bp += NUM_FIELDS;
+                c.pos += 1;
+                match head(self, c, active)? {
+                    Some(k) => srcs.replace_top((k, src), ()),
+                    None => {
+                        srcs.pop();
+                    }
                 }
             }
             new_cnt += 1;
@@ -536,6 +704,9 @@ impl ArrayHeap {
             out.clear();
         }
         self.out_buf = out;
+        for c in cur {
+            self.slot_buf[c.level][c.slot] = c.buf;
+        }
 
         for level in 0..target {
             self.free_slots[level] = (0..self.num_slots as u16).collect();

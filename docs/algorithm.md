@@ -113,7 +113,7 @@ array (leaves of the heap, so none of the smallest keys) is sorted and
 written to disk as a run. At a rebuild, pairs are instead staged per heap,
 sorted a run at a time, and written as runs directly, bypassing the
 in-memory heap; `--reference_order` keeps the one-at-a-time inserts and the
-reference's heap-sort of spills, which fixes the tie order. Runs live in four levels of slots; when a level is
+reference's heap-sort of spills, which fixes the tie order. Runs live in six levels of slots; when a level is
 full, every run below the first level with a free slot is merged into one
 run at that level, and half-empty runs at a level are merged with each other
 first. The head block of every run sits in a second in-memory heap tagged

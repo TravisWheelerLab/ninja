@@ -13,6 +13,7 @@
 use std::path::Path;
 
 use crate::error::Result;
+use crate::heap::HeapStats;
 use crate::heap::{ArrayHeap, ArrayHeapConfig};
 
 /// A frozen snapshot of the search state with a heap of pairs keyed by `q'`.
@@ -38,6 +39,11 @@ pub struct CandidateHeap {
 }
 
 impl CandidateHeap {
+    /// The underlying heap's time and I/O counters.
+    pub(crate) fn stats(&self) -> HeapStats {
+        self.heap.stats
+    }
+
     /// Create an empty candidate heap frozen at `k_prime` taxa with row sums
     /// `r`, able to hold node indices below `node_count`.
     pub fn new(

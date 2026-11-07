@@ -9,6 +9,16 @@
   14.6 s and its peak memory from 4.2 GB to 3.6 GB, with an identical tree.
   ninja prints under `-v` how the join loop's time divides between pulls,
   the update loop, inserts and rebuilds.
+* The external-memory engine's level merges, which rewrite every entry
+  once per promotion between disk levels, run over local cursors instead of
+  nested per-slot bookkeeping, and advance a source by replacing its head in
+  the merge heap rather than popping and pushing. Reads and writes of the
+  heap's scratch file are positioned calls into a reused buffer rather than
+  a seek, a fresh allocation and a copy each. At 20,000 taxa under
+  `--memory 0.1` the merges take 31 s instead of 44 s and the run 70 s
+  instead of 83 s, with the same tree and the same memory. ninja prints
+  under `-v` the join loop's phases for this engine too, and where its
+  heaps' time and I/O go.
 * The update loop after each join keeps its state in registers, indexes
   the matrix through a per-row table instead of a multiply, and packs each
   new distance straight into its batch instead of staging it for a second

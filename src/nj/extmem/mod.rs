@@ -12,6 +12,7 @@
 mod budget;
 mod candidate_heap;
 use candidate_heap::CandidateHeap;
+use std::time::{Duration, Instant};
 mod matrix;
 
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ pub use matrix::DiskMatrix;
 use matrix::RowPager;
 
 use crate::error::{Error, Result};
+use crate::heap::HeapStats;
 use crate::heap::{ArrayHeap, ArrayHeapConfig, MinHeap};
 use crate::tree::Tree;
 
@@ -434,9 +436,15 @@ impl<'a> Builder<'a> {
         // Candidates drained from the frozen heaps, appended once the
         // loop over those heaps has finished (see below).
         let mut drained: Vec<(f32, i32, i32)> = Vec::new();
+        // Time spent in each phase of the join loop, reported under -v.
+        let mut t_pull = Duration::ZERO;
+        let mut t_update = Duration::ZERO;
+        let mut t_insert = Duration::ZERO;
+        let mut t_rebuild = Duration::ZERO;
         while self.next_internal < total {
             let next_i32 = self.next_internal as i32;
             let new_k = self.new_k;
+            let t_loop = Instant::now();
             let nk2 = new_k as f64 - 2.0;
             self.using_simple = true;
 
@@ -687,6 +695,8 @@ impl<'a> Builder<'a> {
                 len_j = 0.0;
                 self.clamped_lengths += 1;
             }
+            t_pull += t_loop.elapsed();
+            let t_join = Instant::now();
             let ni = self.next_internal;
             self.tree.join(ni, mi, mj, len_i as f32, len_j as f32);
             if verbose >= 3 {
@@ -767,6 +777,8 @@ impl<'a> Builder<'a> {
 
             self.new_k -= 1;
             let new_k = self.new_k;
+            t_update += t_join.elapsed();
+            let t_ins = Instant::now();
 
             if steps_until_rebuild == 0 {
                 self.next_internal += 1;
@@ -776,6 +788,7 @@ impl<'a> Builder<'a> {
                 let mi = self.next_internal;
                 self.cluster_and_heap(mi)?;
                 steps_until_rebuild = self.params.next_rebuild_steps(k, new_k);
+                t_rebuild += t_ins.elapsed();
             } else {
                 steps_until_rebuild -= 1;
                 self.clust_maxes.copy_from_slice(&max_t1val);
@@ -796,6 +809,7 @@ impl<'a> Builder<'a> {
                     x = self.active.next[x as usize];
                 }
                 self.next_internal += 1;
+                t_insert += t_ins.elapsed();
             }
 
             if window_full {
@@ -803,6 +817,31 @@ impl<'a> Builder<'a> {
             }
         }
 
+        if verbose >= 2 {
+            let mut hs = HeapStats::default();
+            for h in self.heaps.iter().flatten() {
+                hs.add(&h.stats);
+            }
+            for c in &self.cand_heaps {
+                hs.add(&c.stats());
+            }
+            eprintln!(
+                "join loop: pull {:.2?}, update {:.2?}, insert {:.2?}, rebuild {:.2?}",
+                t_pull, t_update, t_insert, t_rebuild
+            );
+            eprintln!(
+                "heaps: level merges {:.2?} in {} calls, slot merges {:.2?} in {} calls, spill sorts {:.2?}, stores {:.2?}, loads {:.2?}",
+                hs.merge_levels, hs.merge_levels_calls, hs.merge_slots, hs.merge_slots_calls, hs.spill_sort, hs.store, hs.load
+            );
+            eprintln!(
+                "heap I/O: {:.2?} in {} reads ({:.2} GB) and {} writes ({:.2} GB)",
+                hs.io,
+                hs.read_calls,
+                hs.read_bytes as f64 / 1e9,
+                hs.write_calls,
+                hs.write_bytes as f64 / 1e9
+            );
+        }
         if verbose >= 1 {
             eprintln!("{} candidates added", self.stats.candidates_added);
             eprintln!("{} defunct nodes removed", self.stats.defunct_removed);

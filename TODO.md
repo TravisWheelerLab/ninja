@@ -51,6 +51,29 @@ Planned work, roughly in order.
   dependent loads an element), and I think the next lever is algorithmic.
 - Reduce in-memory engine memory: the queues hold an entry for every pair
   (about 12 bytes each); 104 GB at 100,000 taxa.
+- [x] 2026-11-06: Measured the external-memory engine with heap timers (branch
+  `extmem-merges`), 20,000 taxa at `--memory 0.1`, 83.3 s at load 60: level merges 44.0 s
+  in 1,744 calls, of which 9.8 s is 2.8 M one-block reads and 268 k writes; spill sorts
+  4.1 s; stores 2.7 s; engine phases pull 8.4 s, update 8.1 s, insert 31.0 s, rebuild
+  7.3 s; about 28 s outside the loop in the initial fill. 15.1 GB written for 4.7e8
+  entries inserted, so each entry is written about 2.7 times. Merge CPU was 27 ns an
+  entry: nested `Vec<Vec<_>>` bookkeeping indexed several times an entry, two random
+  loads into `redirect` for the dead check, and a pop plus a push on the source heap.
+- [x] 2026-11-06: Rewrote `merge_levels` over local cursors with `replace_top`: merges
+  44.0 s to 31.4 s, run 83.3 s to 71.1 s, reproducible to 0.1 s across alternated pairs,
+  byte-identical tree, same I/O and memory.
+- [x] 2026-11-06: Positioned reads and writes (`FileExt::read_at`/`write_all_at`) into a
+  reused byte buffer for the heap's scratch file. I/O 9.8 s to 9.0 s, run 71.1 s to
+  70.1 s: the seek was cheap, and what remains per 4 KB read is the read itself. The first
+  version kept the buffer at its largest size, a whole run from `store`, which added
+  4 MB of peak memory across 28 heaps that the plan did not account for, and bounding it
+  to a merge's output chunk still left 1.5 MB; it is now kept only at block size.
+- External-memory engine, what is left at 20,000 taxa and 70 s: merges 31 s, of which
+  I/O 9 s in 2.8 M one-block reads; each entry is written about 2.7 times. More slots
+  per level would cut promotions (with 17 slots at this allowance, two per entry; with
+  64, one) at the cost of a head block per slot resident in `h2`, which the plan must
+  account for. Engine phases pull 8.3 s, update 8.1 s (the disk-window update loop, 40 ns
+  an element, not yet hoisted like the in-memory one), initial fill about 28 s.
 - External-memory engine, 20,000 taxa at a 100 MB budget (85.7 s on an idle machine,
   measured 2026-10-05): level
   merges of the disk heaps dominate, then pulls, the update loop, spill
