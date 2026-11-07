@@ -58,11 +58,19 @@ impl Default for ArrayHeapConfig {
 const MAX_LEVELS: usize = 6;
 const NUM_FIELDS: usize = 3;
 /// Resident bytes each entry of a run costs: the in-memory run heap, the
-/// slot buffers backing the runs on disk (one per level), the run-head heap
-/// and the slot bookkeeping, plus the caller's staging buffer of the same
-/// length. Set from measured peak memory rather than `size_of`, because
-/// `Vec` rounds capacities up as it grows.
-const BYTES_PER_RUN_ENTRY: usize = 62;
+/// head blocks of the slots in use (`SLOT_FACTOR` blocks' worth a level),
+/// the run-head heap and the slot bookkeeping, plus the caller's staging
+/// buffer of the same length. Set from measured peak memory rather than
+/// `size_of`, because `Vec` rounds capacities up as it grows.
+const BYTES_PER_RUN_ENTRY: usize = 80;
+/// Slots per level, as a multiple of the blocks in a run. Each level holds
+/// `num_slots + 1` times what the one below holds, so more slots mean fewer
+/// levels and fewer rewrites of each entry on its way up; each slot in use
+/// costs one resident block for its head. At four, a level's head blocks
+/// weigh about as much as the in-memory run heap, and at 20,000 taxa under
+/// a 100 MB budget no entry goes past level 1: 2.0 writes an entry instead
+/// of 2.7 with one run's worth of slots.
+const SLOT_FACTOR: usize = 4;
 /// Output buffering during merges, in blocks.
 const OUT_BLOCKS: usize = 10;
 
@@ -199,7 +207,7 @@ impl ArrayHeap {
         // read_buf and out_buf are the only buffers that do not scale with
         // the run size; give them theirs first.
         let c_m = Self::run_size_for(mem);
-        let num_slots = (c_m / block_size).saturating_sub(1).max(1);
+        let num_slots = (SLOT_FACTOR * (c_m / block_size)).saturating_sub(1).max(1);
         let nodes_per_block = block_size / NUM_FIELDS;
         let fields_per_block = nodes_per_block * NUM_FIELDS;
         let mut cnt_max = [0u64; MAX_LEVELS];
@@ -599,11 +607,8 @@ impl ArrayHeap {
 
         // One cursor per lower run, holding what the slot bookkeeping holds
         // but as plain locals: the merge loop then indexes one vector per
-        // entry instead of a `Vec<Vec<_>>` several times over. Buffers are
-        // taken from the slots and handed back afterwards.
+        // entry instead of a `Vec<Vec<_>>` several times over.
         struct Cursor {
-            level: usize,
-            slot: usize,
             base: u64,
             pos: u64,
             count: u64,
@@ -620,7 +625,7 @@ impl ArrayHeap {
                 if pos < count && buf.len() < fpb {
                     buf.resize(fpb, 0);
                 }
-                cur.push(Cursor { level, slot, base: self.byte_pos(level, slot), pos, count, buf, bp: fpb });
+                cur.push(Cursor { base: self.byte_pos(level, slot), pos, count, buf, bp: fpb });
             }
         }
 
@@ -706,9 +711,10 @@ impl ArrayHeap {
             out.clear();
         }
         self.out_buf = out;
-        for c in cur {
-            self.slot_buf[c.level][c.slot] = c.buf;
-        }
+        // Every lower slot is empty now; drop their head blocks rather than
+        // keep one resident for every slot the heap has ever used. A slot
+        // reallocates its block when a run next lands in it.
+        drop(cur);
 
         for level in 0..target {
             self.free_slots[level] = (0..self.num_slots as u16).collect();

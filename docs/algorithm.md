@@ -113,12 +113,15 @@ array (leaves of the heap, so none of the smallest keys) is sorted and
 written to disk as a run. At a rebuild, pairs are instead staged per heap,
 sorted a run at a time, and written as runs directly, bypassing the
 in-memory heap; `--reference_order` keeps the one-at-a-time inserts and the
-reference's heap-sort of spills, which fixes the tie order. Runs live in six levels of slots; when a level is
-full, every run below the first level with a free slot is merged into one
-run at that level, and half-empty runs at a level are merged with each other
-first. The head block of every run sits in a second in-memory heap tagged
-with its level and slot, so the global minimum is the smaller of two heap
-tops. During merges, entries that mention a joined taxon are discarded, which
+reference's heap-sort of spills, which fixes the tie order. Runs live in six
+levels of slots; when a level is full, every run below the first level with
+a free slot is merged into one run at that level, and half-empty runs at a
+level are merged with each other first. The head block of every run sits in
+a second in-memory heap tagged with its level and slot, so the global
+minimum is the smaller of two heap tops. A level has four runs' worth of
+blocks as slots, so each level holds that many times more than the one
+below and few entries climb past level 1; every slot in use costs one
+resident block, which the per-entry memory constant pays for. During merges, entries that mention a joined taxon are discarded, which
 is how expired pairs leave the structure.
 
 **Candidate heaps** (`nj::extmem::CandidateHeap`). When the candidate list

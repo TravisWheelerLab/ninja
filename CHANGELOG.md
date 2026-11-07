@@ -25,6 +25,18 @@
   through the same pager instead of a window-width one per row. At 20,000
   taxa, 3.8 M matrix reads become 0.18 M and the update phase loses two to
   three seconds.
+* Each level of the external engine's disk heaps has four runs' worth of
+  slots instead of one, so a level holds about four times more before it
+  spills into the next and fewer entries are rewritten on their way up; a
+  slot's head block is freed when a merge empties it instead of staying
+  resident for every slot the heap has used. The memory plan charges each
+  run entry 80 bytes instead of 62 for the head blocks in use, which at
+  20,000 taxa under `--memory 0.1` buys six clusters instead of seven. On
+  that input the heaps write 11.9 GB instead of 15.1 GB, level merges take
+  27 s instead of 32 s, and the run 64 s instead of 70 s at the same peak
+  memory, with an identical tree. At 40,000 taxa the tree's topology is
+  unchanged and a few dozen edge lengths move by 0.00001, because equal
+  keys now leave the heaps in a different order.
 * The update loop after each join keeps its state in registers, indexes
   the matrix through a per-row table instead of a multiply, and packs each
   new distance straight into its batch instead of staging it for a second
