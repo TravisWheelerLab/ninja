@@ -73,6 +73,10 @@ impl fmt::Display for Method {
     }
 }
 
+/// The cluster count the reference implementation used, which its join
+/// order depends on: the count under `reference_order` when none is given.
+pub const REFERENCE_CLUSTERS: usize = 30;
+
 /// Tunables of the NINJA search. The defaults are those of the reference
 /// implementation and the paper.
 ///
@@ -87,7 +91,9 @@ impl fmt::Display for Method {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct NjParams {
-    /// Number of row-sum clusters (heaps are kept per cluster pair).
+    /// Number of row-sum clusters (heaps are kept per cluster pair); 0 lets
+    /// each engine choose its own default, which is [`REFERENCE_CLUSTERS`]
+    /// under [`reference_order`](Self::reference_order).
     pub cluster_count: usize,
     /// Fraction of the remaining taxa to join before rebuilding clusters and
     /// heaps. Ignored when `rebuild_steps` is set. `None` selects 0.5, the

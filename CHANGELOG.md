@@ -40,6 +40,19 @@
 * The external engine's `-v` report shows how long the initial clustering
   and heap build took, split into run sorts, stores and the pair walk, the
   same split for later rebuilds, and how many candidate heaps were built.
+* The external engine defaults to five row-sum clusters instead of 30, and
+  `--clust_size 0`, now the default, lets each engine choose: 30 in memory,
+  5 on disk, and 30 under `--reference_order`, whose join order depends on
+  it. Each level merge in a cluster-pair heap rewrites every entry once, so
+  memory in fewer, larger heaps buys more than the tighter search bounds of
+  more clusters, and below five clusters the looser bounds cost more in the
+  pull phase than the merges saved. The memory plan also gives the heaps the
+  share it reserved for filling the matrix, since the two are never live at
+  the same time, and lowers a tight budget's cluster count to no fewer than
+  five. At 20,000 taxa under `--memory 1.0` the run takes 43 s instead of
+  56 s, and under `--memory 0.1` 59 s instead of 63 s. The tree has the
+  same splits and lengths; where two candidates tie, the join order can
+  differ, as it does whenever the cluster count changes.
 * The update loop after each join keeps its state in registers, indexes
   the matrix through a per-row table instead of a multiply, and packs each
   new distance straight into its batch instead of staging it for a second

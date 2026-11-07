@@ -97,8 +97,9 @@ struct Cli {
     #[arg(long = "memory", value_name = "GB")]
     memory_gb: Option<f64>,
 
-    /// Number of row-sum clusters (see the paper).
-    #[arg(short = 's', long = "clust_size", default_value_t = 30)]
+    /// Number of row-sum clusters (see the paper). 0 lets the engine
+    /// choose: 5 on disk, 30 in memory, and 30 with --reference_order.
+    #[arg(short = 's', long = "clust_size", default_value_t = 0)]
     clust_size: usize,
 
     /// Fraction of remaining taxa joined between rebuilds (see the paper).

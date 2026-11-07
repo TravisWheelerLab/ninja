@@ -334,9 +334,10 @@ fn phylip_bytes(p: &phylip::PhylipMatrix) -> u64 {
 /// distance matrix is built; the engine cannot free it, so it comes out of
 /// the budget before anything is handed out.
 fn extmem_plan(opts: &Options, k: usize, input_bytes: u64, verbose: u8) -> MemoryPlan {
+    let clusters = crate::nj::extmem::resolve_cluster_count(&opts.nj);
     let plan = MemoryPlan::new(
         k,
-        opts.nj.cluster_count,
+        clusters,
         opts.memory_bytes,
         input_bytes,
         crate::nj::extmem::MAX_CAND_HEAPS,
@@ -349,7 +350,7 @@ fn extmem_plan(opts: &Options, k: usize, input_bytes: u64, verbose: u8) -> Memor
         eprintln!("{note}");
     }
     if verbose >= 1 {
-        for note in plan.notes(opts.nj.cluster_count) {
+        for note in plan.notes(clusters) {
             eprintln!("{note}");
         }
     }

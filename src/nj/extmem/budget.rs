@@ -24,7 +24,7 @@ const TARGET_STRUCT_BYTES: u64 = 1 << 20;
 
 /// Fewest clusters worth keeping: below this the search bounds are too
 /// loose to save any work.
-const MIN_CLUSTERS: usize = 4;
+const MIN_CLUSTERS: usize = 5;
 
 /// Bytes per candidate-list slot: the list itself (`cand_d`, `cand_i`,
 /// `cand_j`, `cand_active`, 13 bytes), the free-slot list (`free_cands`,
@@ -164,7 +164,10 @@ impl MemoryPlan {
         let window_bytes = free * 7 / 20;
         let build_scratch = free / 10;
         let cand_share = free * 3 / 20;
-        let pair_share = free - window_bytes - build_scratch - cand_share;
+        // The build scratch is live only while the matrix is filled, before
+        // any heap exists, so the heaps get that share too: the budget binds
+        // the peak, and the two uses never overlap.
+        let pair_share = free - window_bytes - cand_share;
 
         // The smallest a cluster pair can cost: a heap at the allowance
         // below which its buffers stop shrinking, plus the run it stages
@@ -277,15 +280,16 @@ mod tests {
         accounted_with_input(p, k, 0)
     }
 
+    /// The larger of the two phases: filling the matrix (window plus build
+    /// scratch) and the join loop (window plus heaps and candidates).
     fn accounted_with_input(p: &MemoryPlan, k: usize, input: u64) -> u64 {
-        input
-            + (FIXED_PER_TAXON + SCRATCH_PER_TAXON) * k as u64
-            + PAGER_BYTES
-            + p.window_bytes
-            + p.build_scratch
+        let base = input + (FIXED_PER_TAXON + SCRATCH_PER_TAXON) * k as u64 + PAGER_BYTES + p.window_bytes;
+        let fill = base + p.build_scratch;
+        let join = base
             + (p.per_pair_heap + p.per_pair_stage) * pair_heap_count(p.cluster_count)
             + (p.per_cand_heap + CAND_HEAP_PER_TAXON * k as u64) * p.max_cand_heaps as u64
-            + p.cand_list_cap as u64 * CAND_ENTRY_BYTES
+            + p.cand_list_cap as u64 * CAND_ENTRY_BYTES;
+        fill.max(join)
     }
 
     #[test]

@@ -121,9 +121,11 @@ budget covers the matrix window, the scratch used to fill it, the
 cluster-pair heaps, the candidate structures and the per-taxon tables, and
 it is divided by the number of structures rather than applied to each one.
 The smallest budget accepted is 100 MB, and a smaller request is raised to
-it with a warning. When the budget is tight, ninja reduces the cluster count
-so that each cluster-pair heap still has room to work, and says so under
-`--verbose`; very many taxa may need more than the budget for the tree
+it with a warning. The external engine uses five row-sum clusters unless
+`--clust_size` says otherwise, since memory in fewer, larger cluster-pair
+heaps is worth more than the tighter bounds of the in-memory engine's 30;
+when the budget is tight it lowers the count further so that each heap still
+has room to work, and says so under `--verbose`; very many taxa may need more than the budget for the tree
 alone, and ninja says that too rather than quietly overrunning.
 
 ### Performance

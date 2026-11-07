@@ -56,6 +56,24 @@ const MERGE_OLDEST: usize = 20;
 /// `plan` is the division of the memory budget; build it with
 /// [`MemoryPlan::new`] so that the matrix window and the heaps are sized
 /// from the same budget.
+/// Clusters the external engine uses when `cluster_count` is 0 and the
+/// join order is free. Fewer, larger cluster-pair heaps beat more clusters:
+/// each level merge in a heap rewrites every entry once, and below five
+/// clusters the looser search bounds cost more in the pull phase than the
+/// merges saved (20,000 and 40,000 taxa, budgets from 0.1 to 10 GB).
+pub const DEFAULT_CLUSTERS: usize = 5;
+
+/// The cluster count to build with: the one asked for, or this engine's
+/// default when none was, which is 30 under `reference_order` because the
+/// reference's join order depends on it.
+pub(crate) fn resolve_cluster_count(params: &NjParams) -> usize {
+    match params.cluster_count {
+        0 if params.reference_order => crate::nj::REFERENCE_CLUSTERS,
+        0 => DEFAULT_CLUSTERS,
+        n => n,
+    }
+}
+
 pub fn build(
     names: &[String],
     m: DiskMatrix,
@@ -67,15 +85,13 @@ pub fn build(
     if names.len() != k {
         return Err(Error::invalid(format!("{} names but a {}-taxon matrix", names.len(), k)));
     }
-    if params.cluster_count == 0 {
-        return Err(Error::options("cluster count must be at least 1"));
-    }
     // The disk-backed engine keeps the reference rebuild schedule unless a
-    // ratio was given explicitly.
-    let params = if params.rebuild_step_ratio.is_none() {
-        NjParams { rebuild_step_ratio: Some(0.5), ..params.clone() }
-    } else {
-        params.clone()
+    // ratio was given explicitly, and takes its own cluster count when none
+    // was given.
+    let params = NjParams {
+        rebuild_step_ratio: params.rebuild_step_ratio.or(Some(0.5)),
+        cluster_count: resolve_cluster_count(params),
+        ..params.clone()
     };
     let t_init = Instant::now();
     let mut b = Builder::new(names, m, &params, tmp_dir, plan)?;

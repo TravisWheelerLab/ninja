@@ -15,6 +15,9 @@ use super::{ActiveList, NjParams, NjStats};
 /// scale times two, since each of the two branches gets half the distance.
 const LENGTH_SCALE: f32 = 200_000_000.0;
 
+/// Clusters the in-memory engine uses when `cluster_count` is 0.
+pub const DEFAULT_CLUSTERS: usize = 30;
+
 /// Build a tree from a distance matrix with the in-memory engine.
 ///
 /// `names.len()` must equal `d.len()`. The matrix is consumed because it is
@@ -44,9 +47,11 @@ pub fn build(names: &[String], d: DistanceMatrix, params: &NjParams) -> Result<(
     if k == 0 {
         return Err(Error::invalid("no taxa"));
     }
-    if params.cluster_count == 0 {
-        return Err(Error::options("cluster count must be at least 1"));
-    }
+    let params = if params.cluster_count == 0 {
+        &NjParams { cluster_count: DEFAULT_CLUSTERS, ..params.clone() }
+    } else {
+        params
+    };
     let mut b = Builder::new(names, d, params);
     b.run()?;
     Ok((b.tree, b.stats))

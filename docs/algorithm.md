@@ -25,7 +25,7 @@ iterations.
 
 NINJA keeps the exact NJ result but avoids looking at most pairs.
 
-**Clusters.** Taxa are split into `cluster_count` (default 30) clusters by
+**Clusters.** Taxa are split into `cluster_count` (30 in memory, 5 on disk unless `--clust_size` says otherwise) clusters by
 their row sum, using evenly spaced thresholds between the smallest and
 largest sum. For a pair drawn from clusters `a` and `b`,
 
@@ -201,14 +201,21 @@ chunk of rows at a time in parallel, and no matrix is kept.
 `--memory` bounds the external-memory engine rather than scaling it. The
 per-taxon structures that cannot shrink come off the top: the tree arena and
 its names, the redirect table, the active list, the row sums and the cluster
-assignments, about 176 bytes per taxon. What is left is divided three tenths
-to the resident matrix window, one tenth to the scratch that fills it, two
-tenths to the candidate list and candidate heaps, and the rest among the
-`c(c+1)/2` cluster-pair heaps, each of which sizes its runs from its own
-allowance. If that leaves a heap less than a megabyte, the cluster count `c`
-is reduced until it does not, down to four clusters; fewer clusters mean
-looser bounds and more work per join, which is the trade a small budget
-buys. The narrowest matrix window is 64 columns.
+assignments, about 176 bytes per taxon. What is left is divided seven
+twentieths to the resident matrix window, three twentieths to the candidate
+list and candidate heaps, and the rest among the `c(c+1)/2` cluster-pair
+heaps, each of which sizes its runs from its own allowance. The scratch that
+fills the matrix, one tenth, is live only before any heap exists, so the
+heaps' share includes it: the budget bounds the peak, and the two uses never
+overlap. If that leaves a heap less than its minimum, the cluster count `c`
+is reduced until it does not, down to five. The external engine's own
+default is five clusters where the in-memory engine's is 30: each level
+merge in a cluster-pair heap rewrites every entry once, so memory in fewer,
+larger heaps buys more than the tighter bounds of more clusters (at 20,000
+taxa and 1 GB, 5 clusters run in 45 s against 62 s for 22; at 40,000 taxa,
+212 s against 253 s for 20), and below five the looser bounds cost more in
+the pull phase than the merges saved. `--reference_order` uses 30 unless
+told otherwise, since the join order depends on it. The narrowest matrix window is 64 columns.
 
 ## Identical sequences
 
