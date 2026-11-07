@@ -19,6 +19,10 @@
   instead of 83 s, with the same tree and the same memory. ninja prints
   under `-v` the join loop's phases for this engine too, and where its
   heaps' time and I/O go.
+* The external engine pages a joined row's on-disk columns in 64 KB rather
+  than one window width, and its window flush walks an array instead of the
+  active list. At 20,000 taxa, 3.8 M matrix reads become 1.4 M and the update
+  phase loses two to three seconds.
 * The update loop after each join keeps its state in registers, indexes
   the matrix through a per-row table instead of a multiply, and packs each
   new distance straight into its batch instead of staging it for a second

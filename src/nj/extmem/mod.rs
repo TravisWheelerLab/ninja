@@ -13,6 +13,10 @@ mod budget;
 mod candidate_heap;
 use candidate_heap::CandidateHeap;
 use std::time::{Duration, Instant};
+
+/// Floats per page when a joined row's on-disk columns are read: 64 KB a
+/// row, two rows a join. `budget::PAGER_BYTES` accounts for both.
+pub(crate) const PAGER_FLOATS: usize = 1 << 14;
 mod matrix;
 
 use std::path::{Path, PathBuf};
@@ -105,6 +109,10 @@ struct Builder<'a> {
     stage: Vec<Vec<(f32, (i32, i32))>>,
     /// Scratch: active node indices for the update loop.
     rows: Vec<u32>,
+    /// Pagers over the two joined rows' on-disk columns, kept so their
+    /// pages are allocated once rather than every join.
+    pager_i: RowPager,
+    pager_j: RowPager,
 
     cand_d: Vec<f32>,
     cand_i: Vec<i32>,
@@ -131,6 +139,7 @@ impl<'a> Builder<'a> {
         plan: &MemoryPlan,
     ) -> Result<Self> {
         let k = m.k;
+        let row_len = m.row_len;
         let total = 2 * k - 1;
         let mut redirect = vec![-1i32; total];
         for (i, slot) in redirect.iter_mut().enumerate().take(k) {
@@ -157,6 +166,8 @@ impl<'a> Builder<'a> {
             heaps: (0..cc * cc).map(|_| None).collect(),
             stage: (0..cc * cc).map(|_| Vec::new()).collect(),
             rows: Vec::with_capacity(k),
+            pager_i: RowPager::new(0, PAGER_FLOATS.min(row_len)),
+            pager_j: RowPager::new(0, PAGER_FLOATS.min(row_len)),
             cand_d: Vec::with_capacity(10_000),
             cand_i: Vec::with_capacity(10_000),
             cand_j: Vec::with_capacity(10_000),
@@ -441,6 +452,7 @@ impl<'a> Builder<'a> {
         let mut t_update = Duration::ZERO;
         let mut t_insert = Duration::ZERO;
         let mut t_rebuild = Duration::ZERO;
+        let mut t_flush = Duration::ZERO;
         while self.next_internal < total {
             let next_i32 = self.next_internal as i32;
             let new_k = self.new_k;
@@ -720,8 +732,10 @@ impl<'a> Builder<'a> {
             } else {
                 self.m.read_disk_one(ri, mj)?
             };
-            let mut pager_i = RowPager::new(ri, self.m.mem_cols);
-            let mut pager_j = RowPager::new(rj, self.m.mem_cols);
+            let mut pager_i = std::mem::take(&mut self.pager_i);
+            pager_i.reset(ri);
+            let mut pager_j = std::mem::take(&mut self.pager_j);
+            pager_j.reset(rj);
             self.rows.clear();
             let mut x = self.active.first;
             while x < next_i32 {
@@ -742,19 +756,20 @@ impl<'a> Builder<'a> {
                 }
             }
             self.redirect[ni] = ri as i32;
+            self.pager_i = pager_i;
+            self.pager_j = pager_j;
 
             // Flush the resident window when it is full and more columns
             // are still to come.
             let window_full =
                 self.m.uses_disk() && ni + 1 == first + self.m.mem_cols && ni + 1 < self.m.row_len;
             if window_full {
-                let mut rows = Vec::new();
-                let mut x = self.active.first;
-                while x < next_i32 {
-                    rows.push(self.redirect[x as usize] as usize);
-                    x = self.active.next[x as usize];
-                }
-                self.m.flush_rows(rows.into_iter())?;
+                let t_fl = Instant::now();
+                // `rows` still holds the active nodes from the update loop;
+                // walking it beats chasing the active list once per column.
+                let active_rows: Vec<usize> =
+                    self.rows.iter().map(|&x| self.redirect[x as usize] as usize).collect();
+                self.m.flush_rows(active_rows.iter().copied())?;
                 horiz.clear();
                 horiz.resize(ni, 0.0);
                 for col in first..=ni {
@@ -765,14 +780,12 @@ impl<'a> Builder<'a> {
                     for v in horiz.iter_mut() {
                         *v = 0.0;
                     }
-                    let mut x = self.active.first;
-                    while x < next_i32 {
-                        let rx = self.redirect[x as usize] as usize;
+                    for (&x, &rx) in self.rows.iter().zip(&active_rows) {
                         horiz[x as usize] = self.m.mem_get(rx, col);
-                        x = self.active.next[x as usize];
                     }
                     self.m.write_disk(ry as usize, 0, &horiz)?;
                 }
+                t_flush += t_fl.elapsed();
             }
 
             self.new_k -= 1;
@@ -826,8 +839,13 @@ impl<'a> Builder<'a> {
                 hs.add(&c.stats());
             }
             eprintln!(
-                "join loop: pull {:.2?}, update {:.2?}, insert {:.2?}, rebuild {:.2?}",
-                t_pull, t_update, t_insert, t_rebuild
+                "join loop: pull {:.2?}, update {:.2?} (window flushes {:.2?}), insert {:.2?}, rebuild {:.2?}",
+                t_pull, t_update, t_flush, t_insert, t_rebuild
+            );
+            let mio = self.m.io;
+            eprintln!(
+                "matrix I/O: {} reads in {:.2?}, {} writes in {:.2?}",
+                mio.reads, mio.read_time, mio.writes, mio.write_time
             );
             eprintln!(
                 "heaps: level merges {:.2?} in {} calls, slot merges {:.2?} in {} calls, spill sorts {:.2?}, stores {:.2?}, loads {:.2?}",

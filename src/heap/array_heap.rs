@@ -76,7 +76,6 @@ const MIN_RUN_BLOCKS: usize = 16;
 /// Sentinel for "next key for this slot not yet fetched".
 const UNFETCHED: f32 = f32::MIN_POSITIVE;
 
-/// A disk-backed min-priority queue of `(i, j, key)` triples.
 /// Where an external-memory heap's time and I/O go, summed by the engine
 /// over its heaps and reported under `-v`.
 #[derive(Debug, Default, Clone, Copy)]
@@ -113,6 +112,7 @@ impl HeapStats {
     }
 }
 
+/// A disk-backed min-priority queue of `(i, j, key)` triples.
 pub struct ArrayHeap {
     /// Sort spilled runs by heap-sort as the reference did (keeps its tie
     /// order) rather than with the standard sort.

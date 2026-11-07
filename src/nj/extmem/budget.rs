@@ -41,6 +41,9 @@ const SCRATCH_PER_TAXON: u64 = 12;
 /// Bytes per entry staged for a cluster-pair heap: a distance and the pair.
 const STAGE_ENTRY_BYTES: u64 = 12;
 
+/// The two row pagers of the join loop, 64 KB each (`PAGER_FLOATS`).
+const PAGER_BYTES: u64 = 2 * 4 * super::PAGER_FLOATS as u64;
+
 /// Share of a cluster-pair heap's allowance given to the heap itself; the
 /// rest covers the staging buffer, which holds one run's worth of entries
 /// at `STAGE_ENTRY_BYTES` against the heap's `BYTES_PER_RUN_ENTRY`.
@@ -145,7 +148,7 @@ impl MemoryPlan {
         cand_list_cap: usize,
     ) -> Self {
         let k64 = k as u64;
-        let fixed = (FIXED_PER_TAXON + SCRATCH_PER_TAXON) * k64 + input_bytes;
+        let fixed = (FIXED_PER_TAXON + SCRATCH_PER_TAXON) * k64 + input_bytes + PAGER_BYTES;
         // Never let the per-taxon structures swallow the whole budget: the
         // engine needs working room even for a very large k under a small
         // budget, and going over is better than not running.
@@ -277,6 +280,7 @@ mod tests {
     fn accounted_with_input(p: &MemoryPlan, k: usize, input: u64) -> u64 {
         input
             + (FIXED_PER_TAXON + SCRATCH_PER_TAXON) * k as u64
+            + PAGER_BYTES
             + p.window_bytes
             + p.build_scratch
             + (p.per_pair_heap + p.per_pair_stage) * pair_heap_count(p.cluster_count)

@@ -68,6 +68,28 @@ Planned work, roughly in order.
   version kept the buffer at its largest size, a whole run from `store`, which added
   4 MB of peak memory across 28 heaps that the plan did not account for, and bounding it
   to a merge's output chunk still left 1.5 MB; it is now kept only at block size.
+- [x] 2026-11-06, decided against: a bitset of live nodes for the dead check in merges,
+  instead of two loads into `redirect`. Alternated against the committed binary: merges
+  31.95/32.12 s without, 32.39/32.85 s with. Out-of-order execution already hides those
+  loads. Reverted; the merge loop's remaining cost is the source-heap sift and the copy.
+- [x] 2026-11-06: Measured the pager/flush change (64 KB row pagers reused across joins,
+  flush walking the `rows` array, `PAGER_BYTES` in the plan), two alternated pairs at
+  load 40 on a noisy machine: matrix reads 3.8 M to 1.38 M (4.0 s to 2.6-3.0 s), flushes
+  3.5 s to 2.7-3.4 s, update phase 12.8/9.1 s to 7.8/9.9 s, run 79.9/73.8 s to
+  71.8/76.0 s, byte-identical tree, same peak. Signal about 2-3 s, noise about 2 s.
+  Kept: memory-trivial and accounted. Still uncommitted at the time of writing.
+- [x] 2026-11-06: Priced 30% more memory for the read-chunk decision: the committed
+  binary at `--memory 0.13` ran 69.3 s (peak 90.5 MB) against 73.8-79.9 s at 0.1, but
+  merges were 31.9 s against 32.2-32.8 s, unchanged; the gain was in the pull phase,
+  8.5 s to 5.0 s, from the plan keeping more clusters. So spending ~30% of a heap's
+  allowance on merge read chunks costs well under a second of merge time while the
+  chunks could save 3-5 s of the 10 s of heap I/O. Read chunks are worth building,
+  with the budget taught about them. That the pull phase is that sensitive to the
+  cluster count is a separate lever worth a look (`TARGET_STRUCT_BYTES` in budget.rs).
+- The rebuild's pager in `cluster_and_heap` (extmem `mod.rs:277`) still pages at one
+  window width, 1.7 KB; it accounts for about 1.3 M of the 1.38 M matrix reads left after
+  the join-loop pagers went to 64 KB. Reuse `self.pager_i` there; no new buffer, no plan
+  change. Raised 2026-11-06.
 - External-memory engine, what is left at 20,000 taxa and 70 s: merges 31 s, of which
   I/O 9 s in 2.8 M one-block reads; each entry is written about 2.7 times. More slots
   per level would cut promotions (with 17 slots at this allowance, two per entry; with

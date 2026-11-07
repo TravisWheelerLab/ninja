@@ -18,6 +18,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::FileExt;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 
@@ -47,6 +48,8 @@ pub struct DiskMatrix {
     disk: Option<File>,
     /// First column held in the resident window.
     pub(crate) first_mem_col: usize,
+    /// Count and time of the on-disk reads and writes, reported under -v.
+    pub(crate) io: MatrixIo,
     /// Initial row sums, in double precision.
     pub(crate) r: Vec<f64>,
 }
@@ -78,6 +81,15 @@ fn write_at(disk: Option<&File>, row: usize, row_len: usize, col: usize, bytes: 
         let _ = (f, pos);
         Err(Error::invalid("positioned writes need a Unix target"))
     }
+}
+
+/// Where a disk matrix's I/O time goes.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct MatrixIo {
+    pub reads: u64,
+    pub read_time: Duration,
+    pub writes: u64,
+    pub write_time: Duration,
 }
 
 /// Round a distance to seven decimals as the reference did:
@@ -125,6 +137,7 @@ impl DiskMatrix {
             mem: vec![0.0; k * mem_cols],
             disk,
             first_mem_col: 0,
+            io: MatrixIo::default(),
             r: vec![0.0; k],
         })
     }
@@ -261,6 +274,14 @@ impl DiskMatrix {
 
     /// Read `buf.len()` floats of on-disk row `row` starting at `col`.
     pub(crate) fn read_disk(&mut self, row: usize, col: usize, buf: &mut [f32]) -> Result<()> {
+        let t = Instant::now();
+        self.read_disk_raw(row, col, buf)?;
+        self.io.read_time += t.elapsed();
+        self.io.reads += 1;
+        Ok(())
+    }
+
+    fn read_disk_raw(&mut self, row: usize, col: usize, buf: &mut [f32]) -> Result<()> {
         let f = self
             .disk
             .as_mut()
@@ -284,6 +305,14 @@ impl DiskMatrix {
 
     /// Write floats to on-disk row `row` starting at `col`.
     pub(crate) fn write_disk(&mut self, row: usize, col: usize, data: &[f32]) -> Result<()> {
+        let t = Instant::now();
+        self.write_disk_raw(row, col, data)?;
+        self.io.write_time += t.elapsed();
+        self.io.writes += 1;
+        Ok(())
+    }
+
+    fn write_disk_raw(&mut self, row: usize, col: usize, data: &[f32]) -> Result<()> {
         let f = self
             .disk
             .as_mut()
@@ -313,6 +342,7 @@ impl DiskMatrix {
 
 /// A sliding read buffer over one on-disk row, so a sequential scan of old
 /// columns reads the file a block at a time.
+#[derive(Default)]
 pub(crate) struct RowPager {
     row: usize,
     start: usize,
@@ -324,6 +354,13 @@ impl RowPager {
     /// A pager for `row` with `width` floats per page.
     pub(crate) fn new(row: usize, width: usize) -> Self {
         RowPager { row, start: usize::MAX, buf: vec![0.0; width], valid: 0 }
+    }
+
+    /// Point the pager at another row, keeping its page buffer.
+    pub(crate) fn reset(&mut self, row: usize) {
+        self.row = row;
+        self.start = usize::MAX;
+        self.valid = 0;
     }
 
     /// Entry at column `col` of the pager's row (must be an on-disk column).
