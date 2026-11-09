@@ -1,63 +1,53 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 (2026-11-09)
 
-* The in-memory engine inserts each join's new distances as one sorted run
-  per cluster-pair queue instead of one heap push per entry, and packs each
-  entry of such a run into eight bytes, since the new node is common to the
-  run and is stored once. At 20,000 taxa the join loop goes from 16.9 s to
-  14.6 s and its peak memory from 4.2 GB to 3.6 GB, with an identical tree.
-  ninja prints under `-v` how the join loop's time divides between pulls,
-  the update loop, inserts and rebuilds.
-* The external-memory engine's level merges, which rewrite every entry
-  once per promotion between disk levels, run over local cursors instead of
-  nested per-slot bookkeeping, and advance a source by replacing its head in
-  the merge heap rather than popping and pushing. Reads and writes of the
-  heap's scratch file are positioned calls into a reused buffer rather than
-  a seek, a fresh allocation and a copy each. At 20,000 taxa under
-  `--memory 0.1` the merges take 31 s instead of 44 s and the run 70 s
-  instead of 83 s, with the same tree and the same memory. ninja prints
-  under `-v` the join loop's phases for this engine too, and where its
-  heaps' time and I/O go.
-* The external engine pages a joined row's on-disk columns in 64 KB rather
-  than one window width, and its window flush walks an array instead of the
-  active list, and each rebuild of the cluster-pair heaps reads the matrix
-  through the same pager instead of a window-width one per row. At 20,000
-  taxa, 3.8 M matrix reads become 0.18 M and the update phase loses two to
-  three seconds.
-* Each level of the external engine's disk heaps has four runs' worth of
-  slots instead of one, so a level holds about four times more before it
-  spills into the next and fewer entries are rewritten on their way up; a
-  slot's head block is freed when a merge empties it instead of staying
-  resident for every slot the heap has used. The memory plan charges each
-  run entry 80 bytes instead of 62 for the head blocks in use, which at
-  20,000 taxa under `--memory 0.1` buys six clusters instead of seven. On
-  that input the heaps write 11.9 GB instead of 15.1 GB, level merges take
-  27 s instead of 32 s, and the run 64 s instead of 70 s at the same peak
-  memory, with an identical tree. At 40,000 taxa the tree's topology is
-  unchanged and a few dozen edge lengths move by 0.00001, because equal
-  keys now leave the heaps in a different order.
-* The external engine's `-v` report shows how long the initial clustering
-  and heap build took, split into run sorts, stores and the pair walk, the
-  same split for later rebuilds, and how many candidate heaps were built.
-* The external engine defaults to five row-sum clusters instead of 30, and
-  `--clust_size 0`, now the default, lets each engine choose: 30 in memory,
-  5 on disk, and 30 under `--reference_order`, whose join order depends on
-  it. Each level merge in a cluster-pair heap rewrites every entry once, so
+Performance work on both engines, measured on 20,000 simulated taxa (the
+README's `simulate_alignment.py 20000 300 --seed 42`) on a shared machine,
+each change against the previous binary in alternated runs. Where a tree is
+called identical it is byte-identical; where two candidates tie, a change in
+the order the engine meets them can move the root along its edge or an edge
+length by 0.00001, and that is noted.
+
+* In-memory engine: 16.9 s to 13.0 s and 4.2 GB to 3.6 GB. Each join's
+  new distances go into the cluster-pair queues as one sorted run per
+  queue, packed to eight bytes an entry, instead of one heap push per
+  entry; the update loop keeps its state in registers, indexes the matrix
+  through a per-row table, and packs each distance straight into its run.
+  Identical tree.
+* External-memory engine: 83.6 s to 59 s under `--memory 0.1`, and 43 s
+  under `--memory 1.0`; 100,000 taxa under `--memory 0.5` in 26 minutes.
+  The level merges of the disk heaps run over local cursors with positioned
+  reads and writes into a reused buffer; each heap level has four runs'
+  worth of slots instead of one, so fewer entries are rewritten on their
+  way up (11.9 GB written instead of 15.1 GB at 20,000 taxa), and a slot's
+  head block is freed when a merge empties it; the joined rows' on-disk
+  columns are paged in 64 KB and the window flush walks an array instead
+  of the active list (3.8 M matrix reads become 0.18 M); and the memory
+  plan gives the heaps the share it had reserved for filling the matrix,
+  which is never live at the same time. Identical tree at 20,000 taxa for
+  every step but the slot change, which at 40,000 taxa moves a few dozen
+  edge lengths by 0.00001.
+* The external engine defaults to five row-sum clusters instead of 30.
+  Each level merge in a cluster-pair heap rewrites every entry once, so
   memory in fewer, larger heaps buys more than the tighter search bounds of
-  more clusters, and below five clusters the looser bounds cost more in the
-  pull phase than the merges saved. The memory plan also gives the heaps the
-  share it reserved for filling the matrix, since the two are never live at
-  the same time, and lowers a tight budget's cluster count to no fewer than
-  five. At 20,000 taxa under `--memory 1.0` the run takes 43 s instead of
-  56 s, and under `--memory 0.1` 59 s instead of 63 s. The tree has the
-  same splits and lengths; where two candidates tie, the join order can
-  differ, as it does whenever the cluster count changes.
-* The update loop after each join keeps its state in registers, indexes
-  the matrix through a per-row table instead of a multiply, and packs each
-  new distance straight into its batch instead of staging it for a second
-  pass. At 20,000 taxa that is a further 1.3 s off the join loop, 14.6 s to
-  13.0 s, with the same tree.
+  more clusters; at 20,000, 40,000 and 100,000 taxa five was fastest or
+  tied at every budget tried, and below five the looser bounds cost more
+  in the pull phase than the merges saved. `--clust_size 0`, now the default,
+  lets each engine choose: 5 on disk, 30 in memory (where 30 is faster),
+  and 30 under `--reference_order`, whose join order depends on it. A tight
+  budget lowers the count to no fewer than five. Default-mode trees from
+  the external engine have the same splits and lengths as before up to tie
+  order.
+* `-v` reports where the time goes: for both engines, how the join loop
+  divides between pulls, the update loop, inserts and rebuilds; for the
+  external engine, the initial clustering and heap build split into run
+  sorts, stores and the pair walk, the same split for later rebuilds, the
+  heaps' merge, sort, store and I/O times with read and write counts and
+  bytes, the matrix's reads and writes, the window flush time, and how many
+  candidate heaps were built.
+* The README shows a distance-matrix input file rather than naming the
+  format.
 
 ## 2.1.0 (2026-10-06)
 
