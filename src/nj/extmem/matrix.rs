@@ -76,10 +76,23 @@ fn write_at(disk: Option<&File>, row: usize, row_len: usize, col: usize, bytes: 
         f.write_all_at(bytes, pos)?;
         Ok(())
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        let _ = (f, pos);
-        Err(Error::invalid("positioned writes need a Unix target"))
+        use std::os::windows::fs::FileExt;
+        let mut done = 0;
+        while done < bytes.len() {
+            let n = f.seek_write(&bytes[done..], pos + done as u64)?;
+            if n == 0 {
+                return Err(Error::invalid("short write to the distance matrix"));
+            }
+            done += n;
+        }
+        Ok(())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (f, pos, bytes);
+        Err(Error::invalid("positioned writes need a Unix or Windows target"))
     }
 }
 

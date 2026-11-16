@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+* Each release carries prebuilt downloads for Linux (glibc 2.17 or newer,
+  x86-64 and ARM), macOS (Intel, Apple Silicon and a universal build) and
+  Windows, with a table of them and the macOS quarantine fix in the release
+  notes below the CHANGELOG entry. A push to `main` that changes the version
+  in `Cargo.toml` builds and publishes them; the workflow can also be
+  started by hand to add builds to an existing release. The external
+  engine's matrix writes now work on Windows, where they returned an error;
+  we run the Windows build on one example when we make a release and have
+  not tested it further.
+
 ## 2.2.0 (2026-11-09)
 
 Performance work on both engines, measured on 20,000 simulated taxa (the

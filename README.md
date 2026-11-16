@@ -23,6 +23,17 @@ From crates.io, with a Rust toolchain (1.85 or later):
 which installs a binary named `ninja`. Or build from a checkout with
 `cargo build --release`; the binary is `target/release/ninja`.
 
+### Prebuilt downloads
+
+Each [release](https://github.com/TravisWheelerLab/ninja/releases/latest)
+has a table of downloads for Linux, macOS and Windows. Download the one for
+your machine and unpack it; the folder holds `ninja`, which you copy to a
+folder on your `PATH`. You do not need Rust. The Linux program needs glibc
+2.17 or newer. On macOS, if the system refuses to open `ninja` because the
+developer cannot be verified, run `xattr -dr com.apple.quarantine` on the
+unpacked folder. We run the Windows program on one example file when we
+make a release and have not tested it further.
+
 ## Use
 
 Build a tree from a FASTA alignment:

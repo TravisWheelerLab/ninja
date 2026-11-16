@@ -1,0 +1,203 @@
+name: release
+
+# A push to main that changes the version in Cargo.toml builds ninja for
+# Linux, macOS and Windows and publishes the builds as a GitHub release
+# tagged v<version>, with the CHANGELOG entry and a table of downloads as
+# its notes. Starting the workflow by hand releases the current version,
+# or adds the builds to its release if one exists already.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # prefix of the archive names: ninja-<target>.tar.gz
+  NAME: ninja
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # the commit main pointed at before the push, and the tags
+          fetch-depth: 0
+
+      - name: compare versions
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # the version under [package] in Cargo.toml at a commit
+          version_at() {
+            git show "$1:Cargo.toml" 2>/dev/null |
+              sed -n '/^\[package\]/,/^\[/s/^version *= *"\(.*\)"/\1/p'
+          }
+          VERSION=$(version_at HEAD)
+          if [ -z "$VERSION" ]; then
+            echo "no version under [package] in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          RELEASE=false
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "started by hand: releasing v$VERSION"
+            RELEASE=true
+          elif git rev-parse -q --verify "refs/tags/v$VERSION" > /dev/null; then
+            echo "v$VERSION already has a tag: nothing to release"
+          else
+            PREVIOUS=$(version_at "$BEFORE" || true)
+            if [ -z "$PREVIOUS" ]; then
+              echo "cannot read the version before this push: nothing released"
+            elif [ "$PREVIOUS" != "$VERSION" ]; then
+              echo "version changed from $PREVIOUS to $VERSION: releasing v$VERSION"
+              RELEASE=true
+            else
+              echo "version is still $VERSION: nothing to release"
+            fi
+          fi
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    strategy:
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, run: true }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-latest, run: false }
+          - { target: x86_64-apple-darwin, os: macos-latest, run: false }
+          - { target: aarch64-apple-darwin, os: macos-latest, run: true }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, run: true }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+      EXE: ${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install the Rust target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add "$TARGET"
+
+      # Linux: link against glibc 2.17, so the binaries also run on older
+      # systems than the build machine (cargo-zigbuild brings its own linker).
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Linux'
+        with:
+          python-version: '3.x'
+
+      - name: build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          pip install cargo-zigbuild
+          cargo zigbuild --release --locked --target "$TARGET.2.17"
+
+      - name: build (macOS, Windows)
+        if: runner.os != 'Linux'
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: run the build on an example
+        if: matrix.run
+        run: |
+          "target/$TARGET/release/ninja$EXE" --version
+          "target/$TARGET/release/ninja$EXE" --in tests/fixtures/dna_200.fa --out example.nwk
+          head -c 1 example.nwk | grep -q '(' && echo "tree written"
+
+      - name: collect the files for the archive
+        run: |
+          mkdir "$NAME-$TARGET"
+          cp "target/$TARGET/release/ninja$EXE" LICENSE "$NAME-$TARGET/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}-${{ matrix.target }}
+          path: ${{ env.NAME }}-${{ matrix.target }}
+          if-no-files-found: error
+
+  macos-universal:
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.NAME }}-x86_64-apple-darwin
+          path: x86_64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.NAME }}-aarch64-apple-darwin
+          path: aarch64
+
+      - name: join the two builds
+        run: |
+          mkdir "$NAME-macos-universal"
+          lipo -create -output "$NAME-macos-universal/ninja" x86_64/ninja aarch64/ninja
+          cp aarch64/LICENSE "$NAME-macos-universal/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}-macos-universal
+          path: ${{ env.NAME }}-macos-universal
+          if-no-files-found: error
+
+  release:
+    needs: [version, build, macos-universal]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.NAME }}-*
+          path: artifacts
+
+      - name: pack the archives
+        run: |
+          cd artifacts
+          for d in *; do
+            # artifacts lose the executable bit
+            chmod +x "$d"/ninja*
+            if [[ "$d" == *windows* ]]; then
+              zip -qr "$d.zip" "$d"
+            else
+              tar czf "$d.tar.gz" "$d"
+            fi
+            rm -r "$d"
+          done
+          ls -l
+
+      - name: write the release notes
+        run: |
+          python3 .github/workflows/release_notes.py \
+            "$GITHUB_REPOSITORY" "$VERSION" artifacts/* > notes.md
+          cat notes.md
+
+      - name: publish the release
+        run: |
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "v$VERSION has a release: adding the builds and the notes to it"
+            gh release upload "v$VERSION" artifacts/* --clobber
+            gh release edit "v$VERSION" --notes-file notes.md
+          else
+            gh release create "v$VERSION" artifacts/* \
+              --target "$GITHUB_SHA" --title "ninja $VERSION" --notes-file notes.md
+          fi
